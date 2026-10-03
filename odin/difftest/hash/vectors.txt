@@ -1,0 +1,40 @@
+murmur3	Hello, World!
+murmur3	xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+murmur3	
+fnv1a	Hello, World!
+fnv1a	
+murmur3	a
+murmur3	ab
+murmur3	abc
+murmur3	abcd
+murmur3	abcde
+murmur3	abcdef
+murmur3	abcdefg
+murmur3	abcdefgh
+fnv1a	a
+fnv1a	ab
+fnv1a	abc
+fnv1a	abcd
+fnv1a	abcde
+fnv1a	abcdef
+fnv1a	abcdefg
+fnv1a	abcdefgh
+murmur3	a\x80\xff\x00b
+fnv1a	a\x80\xff\x00b
+murmur3	\xff
+fnv1a	\xff
+murmur3	\x80\x81\xfe\xff
+fnv1a	\x80\x81\xfe\xff
+combine	0	0
+combine	1	2
+combine	18446744073709551615	18446744073709551615
+combine	0	18446744073709551615
+combine	18446744073709551615	0
+combine	4294967295	4294967296
+values	0
+values	1	2
+values	1	2	3
+values	1	2	3	4
+values	18446744073709551615	0	1	2
+values	0	0	0	0
+echo	a\x00\x09\x0a\xffABC\x7f\x80

@@ -1,0 +1,80 @@
+parse	{ "jsonrpc": "2.0", "method": "keys", "params": [ "b", "l", "a", "h" ] }
+parse	[10,20]
+parse	-1
+parse	{}
+parse	
+parse	   
+parse	true
+parse	false
+parse	trueX
+parse	falseX
+parse	 true 
+parse	[ ]
+parse	{ }
+parse	[]
+parse	""
+parse	"abc"
+parse	"a\nb"
+parse	"a\"b"
+parse	"a\\b"
+parse	"\u001b"
+parse	0
+parse	123
+parse	-0
+parse	2147483647
+parse	2147483648
+parse	4294967295
+parse	4294967296
+parse	99999999999999999999999
+parse	-2147483648
+parse	-2147483649
+parse	-
+parse	-abc
+parse	--5
+parse	+5
+parse	12ab
+parse	007
+parse	[
+parse	{
+parse	{"a"
+parse	{"a":
+parse	{"a":1
+parse	{"a":1,
+parse	{"a":1}
+parse	{"a":1,"a":2}
+parse	{"b":1,"a":2}
+parse	{1:2}
+parse	{[1]:2}
+parse	{true:2}
+parse	[1,2
+parse	[1 2]
+parse	[1,,2]
+parse	[,]
+parse	,
+parse	:
+parse	]
+parse	}
+parse	"unterminated
+parse	"esc\
+parse	"a\\"b"
+parse	\x00
+parse	\xff
+parse	null
+parse	Null
+parse	TRUE
+parse	1.5
+parse	1e3
+parse	[[[[[[[[[[1]]]]]]]]]]
+serstr	
+serstr	abc
+serstr	\x00\x01\x1f\x20\x7e\x7f\x80\xff
+serstr	\\"quoted\\"
+serstr	back\slash
+serstr	\xc3\xa9\xe4\xb8\xad
+serint	0
+serint	-1
+serint	2147483647
+serint	-2147483648
+serbool	0
+serbool	1
+echo	\x00\xff{}\x09

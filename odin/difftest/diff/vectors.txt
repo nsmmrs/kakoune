@@ -1,0 +1,21 @@
+diff		
+diff	abc	abc
+diff		abc
+diff	abc	
+diff	abcXdef	abcdef
+diff	abcdef	abcXdef
+diff	aaa	aab
+diff	aab	aaa
+diff	abcd	dcba
+diff	the quick brown fox	the quick red fox
+diff	a\x00b	a\x00c
+diff	a\x00b	a\x00b
+diff	line1\x0aline2	line1\x0aline3
+diff	aaaaaaaaaa	aaaaa
+diff	aaaaa	aaaaaaaaaa
+diff	kitten	sitting
+diff	sitting	kitten
+diff	abcdef	abc
+diff	abc	abcdef
+diff	\x09ab	\x09a\x09b
+diff	a_b-c/d.e	a_b-c/d,e

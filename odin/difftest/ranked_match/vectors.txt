@@ -1,0 +1,53 @@
+cmp	so	source	source_data
+cmp	so	source_data	source
+cmp	so	source	source
+cmp	wo	single/word	multiw/ord
+cmp	foobar	foo/bar/foobar	foo/bar/baz
+cmp	db	delete-buffer	debug
+cmp	ct	create_task	constructor
+cmp	cla	class	class::attr
+cmp	meta	meta/	meta-a/
+cmp	find	find(1p)	findfs(8)
+cmp	fin	find(1p)	findfs(8)
+cmp	sys_find	sys_find(1p)	sys_findfs(8)
+cmp		init	__init__
+cmp	ini	init	__init__
+cmp		a	b
+cmp	expresins	expresions	expressionism's
+cmp	foo_b	foo/bar/foo_bar.baz	test/test_foo_bar.baz
+cmp	foo_b	bar/bar_qux/foo_bar.baz	foo/test_foo_bar.baz
+cmp	foo_bar	bar/foo_bar.baz	foo_bar/qux.baz
+cmp	fb	foo_bar/	foo.bar
+cmp	foo_bar	test_foo_bar	foo_test_bar
+cmp	rm.cc	src/ranked_match.cc	test/README.asciidoc
+cmp	luaremote	src/script/LuaRemote.cpp	tests/TestLuaRemote.cpp
+cmp	lang/haystack/needle.c	git.evilcorp.com/language/haystack/aaa/needle.c	git.evilcorp.com/aaa/ng/wrong-haystack/needle.cpp
+cmp	evilcorp-lint/bar.go	scripts/evilcorp-lint/foo/bar.go	src/evilcorp-client/foo/bar.go
+match	run_all_tests	rat
+match	run_all_tests	at
+match	countWordBoundariesMatch	wm
+match	countWordBoundariesMatch	cobm
+match	countWordBoundariesMatch	cWBM
+matchL	run_all_tests	rat
+matchL	countWordBoundariesMatch	cWBM
+matchL	source	so
+matchL	source	S
+match		
+match	abc	
+match		abc
+match	abc	abcd
+match	abc	abc
+match	abc	ABC
+match	ABC	abc
+match	a	b
+letters	abcd
+letters	abcdABCD
+letters	
+letters	___
+letters	---
+letters	aA_-!0
+lowletters	0
+lowletters	18446744073709551615
+lowletters	15
+lowletters	4503599627370496
+echo	a\x00\x09\xc3\xa9b

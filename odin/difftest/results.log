@@ -1,0 +1,67 @@
+Difftest findings (2026-10-03, agent odin-porter)
+================================================
+Base commit: c9cf43d4 (Wave 1 closeout + lane board (wave 2))
+Toolchain: g++ 16.2.1, odin dev-2026-09:a2fb372b7, python 3.14.7
+C++ locale for ranked_match: en_US.utf8 (harness pins LC_ALL, stderr-verified)
+`odin run` vs built-binary equivalence: verified for all 4 modules (--smoke-odin-run)
+
+Modules covered: 4 (hash, diff, ranked_match, json)
+Total vectors compared: 277,954 across 3 full seeds (20261003, 777, 424242)
+  + 1 ranked_match-only seed + pilot (500/module)
+Mismatches found: 0. No repros: there is nothing to reproduce.
+
+Coverage notes (seed 20261003 census):
+- hash: lengths biased 0..9 (every murmur tail path len&3 + empty), full
+  random bytes incl. >=0x80 (fnv1a signed-char quirk), u64 edges for
+  combine/hash_values (0, 2^32+-1, 2^63, 2^64-1, ...).
+- diff: mutation pairs, 2-letter-alphabet alignments, shared prefix/suffix
+  middles, 100..400-byte inputs exercising the cost-limit=1000 fallback.
+- ranked_match: 8,145/20,053 vectors contain bytes >=0x80 (valid + invalid
+  UTF-8) across match/matchL/cmp/letters; 1,476 cmp vectors exercised a
+  real (non-NA) pairwise ordering incl. the UnitTest preferred() pairs.
+- json: every C++ outcome class hit and mapped (OK 10197, NULL 1790,
+  unable-to-parse-json 3669, is-not-a-number 339, bare [/[ 338/75,
+  bad_value_cast 52, expected-comma-or-close 67/35, max-depth 606,
+  expected-colon 75); pure-nesting depths 95..108 at ~60 vectors each,
+  straddling the 100 boundary; 32-bit overflow numbers; dup object keys.
+
+Verdicts:
+- hash: PASS. Bit-identical incl. the sign-extension quirk and wraps.
+- diff: PASS. Identical edit scripts incl. cost-limit fallback path.
+- ranked_match: PASS under en_US.utf8. No libc-wide-char vs core:unicode
+  divergence observed on ~8k non-ASCII vectors per seed. (C-locale
+  behavior was not compared; the port documents the tables as its
+  deviation there, and Kakoune runs under UTF-8 locales in practice.)
+- json: PASS modulo the documented error-model mapping (null/throws -> enum),
+  which held for every failure observed: no unmapped C++ error occurred.
+
+Harness bugs found and fixed during bring-up (not port bugs):
+- a diff seed vector with 4 TAB fields for a 3-field op (both sides
+  correctly reported HARNESS-ERROR);
+- the driver decoded harness stdout as strict ASCII while json output
+  legitimately contains raw >=0x80 bytes (to_json only escapes \, \",
+  <=0x1F); now decoded with the injective backslashreplace transform.
+
+Machine run log follows (fuzz.py --results appends here):
+--------------------------------------------------------
+fuzz.py seed=20261003 count=20000 modules=hash,diff,ranked_match,json
+hash: 25040 vectors (40 seeds), 0 mismatches
+diff: 20021 vectors (21 seeds), 0 mismatches
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+json: 20080 vectors (80 seeds), 0 mismatches
+RESULT: PASS
+fuzz.py seed=777 count=20000 modules=ranked_match
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+RESULT: PASS
+fuzz.py seed=777 count=20000 modules=hash,diff,ranked_match,json
+hash: 25040 vectors (40 seeds), 0 mismatches
+diff: 20021 vectors (21 seeds), 0 mismatches
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+json: 20080 vectors (80 seeds), 0 mismatches
+RESULT: PASS
+fuzz.py seed=424242 count=20000 modules=hash,diff,ranked_match,json
+hash: 25040 vectors (40 seeds), 0 mismatches
+diff: 20021 vectors (21 seeds), 0 mismatches
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+json: 20080 vectors (80 seeds), 0 mismatches
+RESULT: PASS
