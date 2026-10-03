@@ -36,13 +36,14 @@ split. Read this before writing any `.odin` file here.
 - Every module gets `<module>_test.odin` with `@(test)` procs using
   `core:testing` (`expect` / `expect_value`).
 - Port the C++ `UnitTest` assertions 1:1 first, then add edge cases.
-- Verify from the repo root: `odin check ./odin/kak` and
-  `odin test ./odin/kak` must both pass.
+- Verify from the repo root: `odin test ./odin/kak` must pass (it
+  both compiles the package and runs its tests).
 
 ## Style gate
 
-- `odin build`-clean is N/A (library, no main yet): `odin check` is the
-  gate, plus `-vet -strict-style` clean for new files.
+- `odin build` and `odin check` require `package main`, so `odin test`
+  is the compile+test gate for this library. New files must also be
+  `-vet -strict-style` clean (`odin test -vet -strict-style ./odin/kak`).
 - Idiomatic Odin: procs + structs + explicit loops. No methods, no
   hidden allocation, no `auto_cast`, no `#partial` on exhaustive switches.
 
