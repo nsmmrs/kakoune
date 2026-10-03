@@ -9,6 +9,7 @@
 package kak
 
 import "core:mem"
+import "core:strings"
 
 // Register_Manager_Error reports register lookup failures.
 Register_Manager_Error :: enum {
@@ -500,4 +501,37 @@ register_manager_complete_name :: proc(
 		append(&names, entry.name)
 	}
 	return completion_complete(prefix, cursor_pos, names[:], allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Remainder implementations (C++ names from register_manager.hh)
+// ---------------------------------------------------------------------------
+
+// register_manager_get_strings returns the named register's values (C++
+// RegisterManager::operator[] + Register::get, combined). The array is
+// owned; the strings borrow register content, like register_manager_save.
+// Deviation: the C++ throws runtime_error for an unknown register but
+// this signature (fixed by the STUB contract) has no error channel, so
+// it panics with the C++ message instead.
+register_manager_get_strings :: proc(
+	reg: string,
+	ctx: ^Context,
+	allocator := context.allocator,
+) -> [dynamic]string {
+	found, err := register_manager_get_by_name(register_manager_instance(), reg)
+	if err != .None {
+		panic(strings.concatenate({"no such register: '", reg, "'"}))
+	}
+	return register_manager_save(found, ctx, allocator)
+}
+
+// register_manager_complete_register_name completes a register name
+// (C++ RegisterManager::complete_register_name). Candidates borrow the
+// static name table; free only the returned array.
+register_manager_complete_register_name :: proc(
+	prefix: string,
+	cursor_pos: Units_ByteCount,
+	allocator := context.allocator,
+) -> Candidate_List {
+	return register_manager_complete_name(register_manager_instance(), prefix, cursor_pos, allocator)
 }

@@ -171,6 +171,14 @@ buffer_manager_get_ifp :: proc(m: ^Buffer_Manager, name: string) -> ^Buffer {
 	return nil
 }
 
+// buffer_manager_get_buffer_ifp finds a buffer by display name, or by
+// resolved filename for file buffers, in the singleton manager (C++
+// BufferManager::instance().get_buffer_ifp, as called by Buffer::set_name
+// in buffer.cc). Returns nil when nothing matches.
+buffer_manager_get_buffer_ifp :: proc(name: string) -> ^Buffer {
+	return buffer_manager_get_ifp(buffer_manager_instance(), name)
+}
+
 // buffer_manager_get finds a buffer by name (port of
 // BufferManager::get_buffer).
 buffer_manager_get :: proc(

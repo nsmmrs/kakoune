@@ -2860,29 +2860,9 @@ input_handler_scroll_window :: proc(ctx: ^Context, offset: Units_LineCount, on_h
 // coordinator deletes each stub when the real proc merges).
 // ---------------------------------------------------------------------------
 
-scoped_edition_make :: proc(ctx: ^Context) -> Scoped_Edition {
-	panic("STUB: scoped_edition_make")
-}
-
-scoped_edition_destroy :: proc(edition: ^Scoped_Edition) {
-	panic("STUB: scoped_edition_destroy")
-}
-
-buffer_offset_coord_char :: proc(buffer: ^Buffer, coord: Coord_Buffer, offset: Units_CharCount, tabstop: Units_ColumnCount) -> Coord_Buffer {
-	panic("STUB: buffer_offset_coord_char")
-}
-
-buffer_offset_coord_line :: proc(buffer: ^Buffer, coord: Coord_Buffer_And_Target, offset: Units_LineCount, tabstop: Units_ColumnCount) -> Coord_Buffer_And_Target {
-	panic("STUB: buffer_offset_coord_line")
-}
-
-buffer_iterator_value :: proc(it: Buffer_Iterator) -> rune {
-	panic("STUB: buffer_iterator_value")
-}
-
-selection_list_make_multi :: proc(buffer: ^Buffer, sels: [dynamic]Selection, allocator := context.allocator) -> Selection_List {
-	panic("STUB: selection_list_make_multi")
-}
+// (Remainder stubs implemented in their owner modules: scoped_edition_make,
+// scoped_edition_destroy, buffer_offset_coord_char, buffer_offset_coord_line,
+// buffer_iterator_value, selection_list_make_multi.)
 
 normal_get_command :: proc(key: Keys_Key) -> (Normal_Cmd, bool) {
 	panic("STUB: normal_get_command")
@@ -2892,11 +2872,6 @@ normal_paste_pos :: proc(buffer: ^Buffer, min, max: Coord_Buffer, mode: Paste_Mo
 	panic("STUB: normal_paste_pos")
 }
 
-command_parser_make :: proc(str: string) -> Command_Parser {
-	panic("STUB: command_parser_make")
-}
-
-command_parser_read_token :: proc(parser: ^Command_Parser, throw_on_unterminated: bool, allocator := context.allocator) -> (Token, bool) {
-	panic("STUB: command_parser_read_token")
-}
+// (Remainder stubs implemented in command_manager.odin: command_parser_make,
+// command_parser_read_token.)
 

@@ -1210,17 +1210,9 @@ client_busy_indicator_destroy :: proc(bi: ^Busy_Indicator) {
 // these when the owning modules merge)
 // ---------------------------------------------------------------------------
 
-scoped_selection_edition_make :: proc(ctx: ^Context) -> Scoped_Selection_Edition {
-	panic("STUB: scoped_selection_edition_make")
-}
-
-scoped_selection_edition_destroy :: proc(e: ^Scoped_Selection_Edition) {
-	panic("STUB: scoped_selection_edition_destroy")
-}
-
-option_get_debug_flags :: proc(o: ^Option) -> Option_types_Debug_Flags {
-	panic("STUB: option_get_debug_flags")
-}
+// (Remainder stubs implemented in their owner modules:
+// scoped_selection_edition_make, scoped_selection_edition_destroy,
+// option_get_debug_flags.)
 
 buffer_utils_reload_file_buffer :: proc(b: ^Buffer) {
 	panic("STUB: buffer_utils_reload_file_buffer")
@@ -1230,12 +1222,4 @@ debug_write_to_buffer :: proc(s: string) {
 	panic("STUB: debug_write_to_buffer")
 }
 
-command_expand :: proc(
-	str: string,
-	ctx: ^Context,
-	shell_ctx: ^Shell_Context,
-	postprocess: Client_Postprocess,
-	allocator := context.allocator,
-) -> string {
-	panic("STUB: command_expand")
-}
+// (Remainder stub implemented in command_manager.odin: command_expand.)

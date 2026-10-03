@@ -1579,6 +1579,75 @@ command_manager_nested_complete :: proc(
 }
 
 // ---------------------------------------------------------------------------
+// Remainder implementations: C++-named aliases over the procs above.
+// ---------------------------------------------------------------------------
+
+// command_parser_make creates a parser over str (C++ CommandParser ctor).
+command_parser_make :: proc(str: string) -> Command_Parser {
+	return command_manager_parser_make(str)
+}
+
+// command_parser_read_token reads the next token (C++
+// CommandParser::read_token). The token content is owned; ok is false at
+// end of input. Deviation: the C++ throws parse_error but this signature
+// (fixed by the STUB contract) has no error channel, so errors panic with
+// the owned message. Unreachable for the merged call sites, which pass
+// throw_on_unterminated=false like the C++ prompt completion.
+command_parser_read_token :: proc(
+	parser: ^Command_Parser,
+	throw_on_unterminated: bool,
+	allocator := context.allocator,
+) -> (Token, bool) {
+	tok, ok, err, msg := command_manager_read_token(parser, throw_on_unterminated, allocator)
+	if err != .None {
+		panic(msg)
+	}
+	return tok, ok
+}
+
+// command_expand_postprocess_adapter adapts a Client_Postprocess (carried
+// in context.user_ptr by command_expand) to Command_Manager_Postprocess.
+@(private = "file")
+command_expand_postprocess_adapter :: proc(s: string, allocator: mem.Allocator) -> string {
+	pp := cast(^Client_Postprocess)context.user_ptr
+	return pp.call(pp.data, s)
+}
+
+// command_expand expands %x{...} interpolations in str, mapping every
+// expansion through postprocess (C++ expand with postprocess). The result
+// is owned, and postprocess must return an owned string (like the C++
+// String return); the expansion frees it. Deviations (both forced by the
+// fixed STUB signature): errors
+// panic with the message instead of returning it (the C++ throws), and
+// the caller's context.allocator is temporarily set to allocator so the
+// postprocess callback (which allocates implicitly) uses the same
+// allocator the expansion frees with.
+command_expand :: proc(
+	str: string,
+	ctx: ^Context,
+	shell_ctx: ^Shell_Context,
+	postprocess: Client_Postprocess,
+	allocator := context.allocator,
+) -> string {
+	context.allocator = allocator
+	pp := postprocess
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &pp
+	defer context.user_ptr = prev_user_ptr
+	res, err, msg := command_manager_expand_with_postprocess(
+		str,
+		ctx,
+		shell_ctx,
+		command_expand_postprocess_adapter,
+		allocator,
+	)
+	if err != .None {
+		panic(msg)
+	}
+	return res
+}
+
+// ---------------------------------------------------------------------------
 // STUBS: called-but-unmerged procs (STUB protocol). Each body is exactly
 // one panic line; signatures adapt the C++ headers. Shared stubs used by
 // hook_manager.odin also live here so they are defined exactly once.
@@ -1592,72 +1661,20 @@ debug_write_to_debug_buffer :: proc(str: string) {
 // C++ Context::options (context.hh).
 // C++ OptionManager::operator[] (option_manager.hh). Returns the named
 // option (borrowed).
-// C++ Option::get<DebugFlags> (option_manager.hh). NOTE: knot.odin's
-// Option_Value union has no DebugFlags variant (see the final report),
-// so typed reads go through this stub until the union grows one.
-// C++ complete() template (completion.hh), adapted to []string: rank the
-// borrowed candidates against query and return the owned winners.
-completion_complete_strings :: proc(query: string, cursor_pos: Units_ByteCount, candidates: []string, allocator := context.allocator) -> Candidate_List {
-	panic("STUB: completion_complete_strings")
-}
-
 // C++ Context::aliases (context.hh).
 // C++ AliasRegistry::operator[] (alias_registry.hh). Borrowed result, ""
 // when the alias is undefined.
 // C++ AliasRegistry::aliases_for (alias_registry.hh). Borrowed names in
 // an owned list.
-// C++ AliasRegistry::flatten_aliases (alias_registry.hh), names only:
-// borrowed names in an owned list.
-alias_registry_flatten_alias_names :: proc(reg: ^Alias_Registry, allocator := context.allocator) -> [dynamic]string {
-	panic("STUB: alias_registry_flatten_alias_names")
-}
-
 // C++ Context::hooks (context.hh).
 // C++ Context::main_sel_register_value (context.hh). Borrowed result.
-// C++ Option::get_as_string (option_manager.hh). Owned result.
-option_get_as_string :: proc(opt: ^Option, quoting: Option_types_Quoting, allocator := context.allocator) -> string {
-	panic("STUB: option_get_as_string")
-}
-
-// C++ Option::get_as_strings (option_manager.hh). Owned strings.
-option_get_as_strings :: proc(opt: ^Option, allocator := context.allocator) -> [dynamic]string {
-	panic("STUB: option_get_as_strings")
-}
-
-// C++ RegisterManager::operator[] + Register::get (register_manager.hh),
-// combined: the owned register values.
-register_manager_get_strings :: proc(reg: string, ctx: ^Context, allocator := context.allocator) -> [dynamic]string {
-	panic("STUB: register_manager_get_strings")
-}
-
-// C++ RegisterManager::complete_register_name (register_manager.hh).
-register_manager_complete_register_name :: proc(prefix: string, cursor_pos: Units_ByteCount, allocator := context.allocator) -> Candidate_List {
-	panic("STUB: register_manager_complete_register_name")
-}
-
-// C++ GlobalScope::instance().option_registry() (scope.hh).
-global_scope_option_registry :: proc() -> ^Options_Registry {
-	panic("STUB: global_scope_option_registry")
-}
-
-// C++ OptionsRegistry::complete_option_name (option_manager.hh).
-options_registry_complete_option_name :: proc(reg: ^Options_Registry, prefix: string, cursor_pos: Units_ByteCount, allocator := context.allocator) -> Candidate_List {
-	panic("STUB: options_registry_complete_option_name")
-}
+// (Remainder stubs implemented: option_get_as_string,
+// option_get_as_strings, register_manager_get_strings,
+// register_manager_complete_register_name, global_scope_option_registry,
+// options_registry_complete_option_name.)
 
 // C++ shell_complete (completion.hh).
 // C++ complete_filename (completion.hh).
-// C++ LocalScope ctor/dtor (local_scope.hh).
-local_scope_make :: proc(ctx: ^Context) -> Local_Scope {
-	panic("STUB: local_scope_make")
-}
-
-local_scope_destroy :: proc(s: ^Local_Scope) {
-	panic("STUB: local_scope_destroy")
-}
-
-// C++ Context(EmptyContextFlag)/dtor (context.hh).
-context_make_empty :: proc(allocator := context.allocator) -> Context {
-	panic("STUB: context_make_empty")
-}
+// (Remainder stubs implemented: local_scope_make, local_scope_destroy,
+// context_make_empty.)
 

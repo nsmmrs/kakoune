@@ -1539,8 +1539,52 @@ buffer_on_unregistered :: proc(b: ^Buffer) {
 // --- Stubs for procs owned by unmerged modules. Each body is exactly
 // one panic line per the STUB protocol; the coordinator deletes the stub
 // when the real proc merges. ---
+// (Remainder stub implemented: buffer_manager_get_buffer_ifp.)
 
-buffer_manager_get_buffer_ifp :: proc(name: string) -> ^Buffer {
-	panic("STUB: buffer_manager_get_buffer_ifp")
+// ---------------------------------------------------------------------------
+// Remainder implementations (C++-named aliases over this module's procs)
+// ---------------------------------------------------------------------------
+
+// scoped_edition_make opens a buffer edition for the context buffer, if
+// any (C++ ScopedEdition ctor in context.hh; the name is kept from the
+// STUB contract). Pair with scoped_edition_destroy.
+scoped_edition_make :: proc(ctx: ^Context) -> Scoped_Edition {
+	return context_scoped_edition_make(ctx)
+}
+
+// scoped_edition_destroy closes the edition (C++ ScopedEdition dtor).
+scoped_edition_destroy :: proc(edition: ^Scoped_Edition) {
+	context_scoped_edition_destroy(edition)
+}
+
+// buffer_offset_coord_char moves coord by offset codepoints (C++
+// Buffer::offset_coord overload; the ColumnCount parameter is unused in
+// the C++ too).
+buffer_offset_coord_char :: proc(
+	buffer: ^Buffer,
+	coord: Coord_Buffer,
+	offset: Units_CharCount,
+	tabstop: Units_ColumnCount,
+) -> Coord_Buffer {
+	return buffer_offset_coord_by_char(buffer, coord, offset, tabstop)
+}
+
+// buffer_offset_coord_line moves coord vertically by offset lines,
+// keeping the target column (C++ Buffer::offset_coord
+// BufferCoordAndTarget overload).
+buffer_offset_coord_line :: proc(
+	buffer: ^Buffer,
+	coord: Coord_Buffer_And_Target,
+	offset: Units_LineCount,
+	tabstop: Units_ColumnCount,
+) -> Coord_Buffer_And_Target {
+	return buffer_offset_coord_by_line(buffer, coord, offset, tabstop)
+}
+
+// buffer_iterator_value returns the byte at the iterator, widened to a
+// rune (C++ BufferIterator::operator*, which returns char; the rune type
+// is fixed by the STUB contract).
+buffer_iterator_value :: proc(it: Buffer_Iterator) -> rune {
+	return rune(buffer_iterator_deref(it))
 }
 

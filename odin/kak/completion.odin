@@ -355,6 +355,19 @@ completion_complete_nothing :: proc(
 	return Completions{start = cursor_pos, end = cursor_pos}
 }
 
+// completion_complete_strings ranks candidates against the query
+// truncated to cursor_pos bytes, best match first (C++ complete()
+// template in completion.hh; the name is kept from the STUB contract).
+// Candidates borrow the caller's strings; free only the returned array.
+completion_complete_strings :: proc(
+	query: string,
+	cursor_pos: Units_ByteCount,
+	candidates: []string,
+	allocator := context.allocator,
+) -> Candidate_List {
+	return completion_complete(query, cursor_pos, candidates, allocator)
+}
+
 // completion_offset_pos shifts a completion range by offset, keeping its
 // candidates and flags (port of offset_pos). The result shares the
 // candidates array with the input.

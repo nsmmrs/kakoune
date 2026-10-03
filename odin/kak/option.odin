@@ -128,3 +128,37 @@ option_watcher_notify :: proc(w: Option_Watcher, option: rawptr) {
 		w.on_option_changed(w.data, option)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Remainder implementations (C++ Option methods from option_manager.hh,
+// kept here per the remainder assignment)
+// ---------------------------------------------------------------------------
+
+// option_get_as_string formats the option value (C++
+// Option::get_as_string). The result is owned.
+option_get_as_string :: proc(
+	opt: ^Option,
+	quoting: Option_types_Quoting,
+	allocator := context.allocator,
+) -> string {
+	return option_manager_option_get_as_string(opt, quoting, allocator)
+}
+
+// option_get_as_strings formats the option value as strings (C++
+// Option::get_as_strings). The array and its elements are owned.
+// Deviation: the merged option_manager returns a slice here; this wraps
+// it into the [dynamic]string the STUB contract requires.
+option_get_as_strings :: proc(opt: ^Option, allocator := context.allocator) -> [dynamic]string {
+	strs := option_manager_option_get_as_strings(opt, allocator)
+	res := make([dynamic]string, len(strs), allocator)
+	copy(res[:], strs)
+	delete(strs, allocator)
+	return res
+}
+
+// option_get_debug_flags reads a DebugFlags option value (C++
+// Option::get<DebugFlags>). Panics when the option holds another type,
+// like the C++ runtime_error.
+option_get_debug_flags :: proc(o: ^Option) -> Option_types_Debug_Flags {
+	return o.value.(Option_types_Debug_Flags)
+}

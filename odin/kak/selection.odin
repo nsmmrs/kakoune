@@ -970,6 +970,43 @@ selection_list_from_strings :: proc(
 	}, .None
 }
 
+// ---------------------------------------------------------------------------
+// Remainder implementations
+// ---------------------------------------------------------------------------
+
+// scoped_selection_edition_make opens a selection edition unless the
+// context is a draft or buffer-less (C++ ScopedSelectionEdition ctor in
+// context.hh; the name is kept from the STUB contract). Pair with
+// scoped_selection_edition_destroy.
+scoped_selection_edition_make :: proc(ctx: ^Context) -> Scoped_Selection_Edition {
+	return context_scoped_selection_edition_make(ctx)
+}
+
+// scoped_selection_edition_destroy closes the edition (C++
+// ScopedSelectionEdition dtor).
+scoped_selection_edition_destroy :: proc(e: ^Scoped_Selection_Edition) {
+	context_scoped_selection_edition_destroy(e)
+}
+
+// selection_list_make_multi builds a list from sels (C++
+// SelectionList(Buffer&, Vector<Selection>): main is the last selection,
+// timestamp is the buffer's). Like the C++ move, this takes ownership of
+// the sels array: the caller must not use or free it afterwards.
+selection_list_make_multi :: proc(
+	buffer: ^Buffer,
+	sels: [dynamic]Selection,
+	allocator := context.allocator,
+) -> Selection_List {
+	assert(len(sels) > 0)
+	return Selection_List {
+		main       = len(sels) - 1,
+		selections = sels,
+		buffer     = buffer,
+		timestamp  = buffer_timestamp(buffer),
+		allocator  = allocator,
+	}
+}
+
 // --- Buffer / buffer_utils stubs (owned by those modules; STUB protocol) ---
 
 buffer_utils_get_column :: proc(buffer: ^Buffer, tabstop: Coord_Column, coord: Coord_Buffer) -> Coord_Column {

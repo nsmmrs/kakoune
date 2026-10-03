@@ -292,5 +292,44 @@ scope_local_destroy :: proc(l: ^Local_Scope, allocator := context.allocator) {
 	free(l, allocator)
 }
 
+// ---------------------------------------------------------------------------
+// Remainder implementations (C++ names from local_scope.hh / scope.hh)
+// ---------------------------------------------------------------------------
+
+// local_scope_make builds a child scope of the context's current scope
+// and pushes it on the context's local scope stack (C++ LocalScope
+// ctor). Pair with local_scope_destroy. Deviation: the C++ object lives
+// on the caller's stack and pushes `this`, which a value-returning Odin
+// proc cannot do (the returned value is a copy); instead the stack holds
+// a heap Scope shell with the same data, freed by the destroy proc. The
+// shell is invisible to scope accessors, which only read .data.
+local_scope_make :: proc(ctx: ^Context) -> Local_Scope {
+	ls := Local_Scope{ctx = ctx}
+	ls.scope = scope_make_child(context_scope(ctx))
+	shell := new(Scope)
+	shell^ = ls.scope
+	append(&ctx.local_scopes, shell)
+	return ls
+}
+
+// local_scope_destroy pops a local scope off its context stack and frees
+// it (C++ ~LocalScope, which requires LIFO order; the data-identity
+// assert is the equivalent of the C++ back() == this check).
+local_scope_destroy :: proc(s: ^Local_Scope) {
+	n := len(s.ctx.local_scopes)
+	assert(n > 0)
+	shell := pop(&s.ctx.local_scopes)
+	assert(shell.data == s.scope.data)
+	free(shell)
+	scope_destroy(&s.scope)
+}
+
+// global_scope_option_registry returns the process-wide global scope's
+// options registry (C++ GlobalScope::instance().option_registry()). The
+// global scope must be initialized (scope_global_init).
+global_scope_option_registry :: proc() -> ^Options_Registry {
+	return scope_global_option_registry(scope_global_instance())
+}
+
 // hook_manager_run_hook runs hook with param (C++
 // HookManager::run_hook in hook_manager.hh).

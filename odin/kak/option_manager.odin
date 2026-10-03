@@ -2398,6 +2398,20 @@ option_manager_registry_complete_name :: proc(
 	return res
 }
 
+// options_registry_complete_option_name completes an option name against
+// the registry's non-hidden descs (C++
+// OptionsRegistry::complete_option_name in option_manager.cc; the name is
+// kept from the STUB contract). Candidates own their strings; free with
+// option_manager_candidates_free.
+options_registry_complete_option_name :: proc(
+	reg: ^Options_Registry,
+	prefix: string,
+	cursor_pos: Units_ByteCount,
+	allocator := context.allocator,
+) -> Candidate_List {
+	return option_manager_registry_complete_name(reg, prefix, cursor_pos, allocator)
+}
+
 // option_manager_candidates_free frees a completion candidate list.
 option_manager_candidates_free :: proc(list: ^Candidate_List, allocator := context.allocator) {
 	for c in list^ {

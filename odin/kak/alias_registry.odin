@@ -167,3 +167,19 @@ alias_registry_flatten :: proc(reg: ^Alias_Registry, allocator := context.alloca
 	}
 	return res
 }
+
+// alias_registry_flatten_alias_names lists the names of every visible
+// alias with shadowing (C++ flatten_aliases in alias_registry.hh, names
+// only). The caller deletes the result; the names stay borrowed.
+alias_registry_flatten_alias_names :: proc(
+	reg: ^Alias_Registry,
+	allocator := context.allocator,
+) -> [dynamic]string {
+	flat := alias_registry_flatten(reg, allocator)
+	defer delete(flat)
+	names := make([dynamic]string, len(flat), allocator)
+	for e, i in flat {
+		names[i] = e.alias
+	}
+	return names
+}

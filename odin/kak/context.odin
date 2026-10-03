@@ -578,6 +578,20 @@ context_init_empty :: proc(ctx: ^Context, allocator := context.allocator) {
 	ctx.allocator = allocator
 }
 
+// context_make_empty builds a buffer-less, client-less context (C++
+// Context(EmptyContextFlag)). Tear down with context_destroy. Deviation:
+// the C++ self-links selection_history to the in-place object, but a
+// value-returning Odin proc cannot self-link (the returned value is a
+// copy, verified experimentally), so the link is nilled: selection undo
+// on such a context fails fast instead of reading a dead frame. The
+// merged caller (module loading) never undoes selections.
+context_make_empty :: proc(allocator := context.allocator) -> Context {
+	ctx: Context
+	context_init_empty(&ctx, allocator)
+	ctx.selection_history.ctx = nil
+	return ctx
+}
+
 // context_init initializes a context with selections in caller-owned
 // storage (C++ Context::Context(InputHandler&, SelectionList, Flags,
 // String)). The selections and name are cloned with allocator; tear down
