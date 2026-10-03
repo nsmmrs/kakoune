@@ -2936,14 +2936,6 @@ insert_completer_explicit_line_all_complete :: proc(completer: ^Insert_Completer
 	panic("STUB: insert_completer_explicit_line_all_complete")
 }
 
-word_db_get :: proc(buffer: ^Buffer) -> ^Word_DB {
-	panic("STUB: word_db_get")
-}
-
-word_db_find_matching :: proc(db: ^Word_DB, str: string, allocator := context.allocator) -> [dynamic]Ranked_Match {
-	panic("STUB: word_db_find_matching")
-}
-
 command_parser_make :: proc(str: string) -> Command_Parser {
 	panic("STUB: command_parser_make")
 }
