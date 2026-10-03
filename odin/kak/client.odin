@@ -1315,18 +1315,6 @@ global_scope_instance :: proc() -> ^Global_Scope {
 	panic("STUB: global_scope_instance")
 }
 
-client_manager_instance :: proc() -> ^Client_Manager {
-	panic("STUB: client_manager_instance")
-}
-
-client_manager_add_free_window :: proc(m: ^Client_Manager, window: ^Window, selections: Selection_List) {
-	panic("STUB: client_manager_add_free_window")
-}
-
-client_manager_get_free_window :: proc(m: ^Client_Manager, buffer: ^Buffer) -> Window_And_Selections {
-	panic("STUB: client_manager_get_free_window")
-}
-
 buffer_utils_reload_file_buffer :: proc(b: ^Buffer) {
 	panic("STUB: buffer_utils_reload_file_buffer")
 }

@@ -2885,10 +2885,6 @@ window_set_position :: proc(window: ^Window, pos: Coord_Display) {
 	panic("STUB: window_set_position")
 }
 
-register_manager_instance :: proc() -> ^Register_Manager {
-	panic("STUB: register_manager_instance")
-}
-
 normal_get_command :: proc(key: Keys_Key) -> (Normal_Cmd, bool) {
 	panic("STUB: normal_get_command")
 }

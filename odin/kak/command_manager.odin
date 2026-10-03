@@ -1663,15 +1663,7 @@ options_registry_complete_option_name :: proc(reg: ^Options_Registry, prefix: st
 }
 
 // C++ shell_complete (completion.hh).
-completion_shell_complete :: proc(ctx: ^Context, str: string, cursor_pos: Units_ByteCount, allocator := context.allocator) -> Completions {
-	panic("STUB: completion_shell_complete")
-}
-
 // C++ complete_filename (completion.hh).
-completion_complete_filename :: proc(prefix: string, ignore: ^Regex, cursor_pos: Units_ByteCount, flags: Filename_Flags, allocator := context.allocator) -> Candidate_List {
-	panic("STUB: completion_complete_filename")
-}
-
 // C++ LocalScope ctor/dtor (local_scope.hh).
 local_scope_make :: proc(ctx: ^Context) -> Local_Scope {
 	panic("STUB: local_scope_make")
