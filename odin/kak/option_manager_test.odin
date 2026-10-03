@@ -983,7 +983,6 @@ option_manager_test_enum_options :: proc(t: ^testing.T) {
 	// to_strings wraps the single name; add/remove are unsupported.
 	strs := option_manager_value_to_strings(Option_Value(Byte_Order_Mark.Utf8))
 	defer option_manager_test_strings_free(strs)
-	defer delete(strs)
 	testing.expect_value(t, len(strs), 1)
 	testing.expect_value(t, strs[0], "utf8")
 	ev: Option_Value = Eol_Format.Lf

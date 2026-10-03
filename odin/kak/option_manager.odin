@@ -150,7 +150,7 @@ option_manager_flags_to_string :: proc(flags: $F, descs: []Enum_Desc($G), alloca
 option_manager_flags_from_string :: proc($F: typeid, $G: typeid, s: string, descs: []Enum_Desc(G), allocator := context.allocator) -> (F, bool) {
 	_ = allocator
 	parts := strings.split(s, "|", context.temp_allocator)
-	defer delete(parts)
+	defer delete(parts, context.temp_allocator)
 	flags: F
 	for part in parts {
 		flag, ok := enum_from_name(descs, part)
