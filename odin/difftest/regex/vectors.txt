@@ -1,0 +1,174 @@
+compile	a*b	0
+compile	a*b	2
+compile	a*b	1
+compile	a*b	4
+compile	^(foo|qux|baz)+(bar)?baz$	0
+compile	((?<year>\d+)-(?<month>\d+)-(?<day>\d+))	0
+compile	(?=a*)	0
+compile	(?=(a))	0
+compile	(?=a|b)	0
+compile	(oops	0
+compile		0
+compile	a{3,5}b	0
+compile	a{1001}b	0
+compile	foo\Kbar	0
+compile	\Q...\E+	0
+compile	([^\x5cx00-\x5cx7F]+)	0
+match	a*b	0	b
+match	a*b	0	ab
+match	a*b	0	aaab
+match	a*b	0	acb
+match	a*b	0	abc
+match	a*b	0	
+match	^a.*b$	0	afoob
+match	^a.*b$	0	ab
+match	^a.*b$	0	bab
+match	^a.*b$	0	
+match	^(foo|qux|baz)+(bar)?baz$	0	fooquxbarbaz
+match	^(foo|qux|baz)+(bar)?baz$	0	fooquxbarbaze
+match	^(foo|qux|baz)+(bar)?baz$	0	quxbar
+match	^(foo|qux|baz)+(bar)?baz$	0	blahblah
+match	^(foo|qux|baz)+(bar)?baz$	0	bazbaz
+match	^(foo|qux|baz)+(bar)?baz$	0	quxbaz
+match	.*\b(foo|bar)\b.*	0	qux foo baz
+match	.*\b(foo|bar)\b.*	0	quxfoobaz
+match	.*\b(foo|bar)\b.*	0	bar
+match	.*\b(foo|bar)\b.*	0	foobar
+match	(foo|bar)	0	foo
+match	(foo|bar)	0	bar
+match	(foo|bar)	0	foobar
+match	[aA]	0	a
+match	[aA]	0	A
+match	a{3,5}b	0	aab
+match	a{3,5}b	0	aaab
+match	a{3,5}b	0	aaaaaab
+match	a{3,5}b	0	aaaaab
+match	a{3}b	0	aab
+match	a{3}b	0	aaab
+match	a{3}b	0	aaaab
+match	a{3,}b	0	aab
+match	a{3,}b	0	aaab
+match	a{3,}b	0	aaaaab
+match	a{,3}b	0	b
+match	a{,3}b	0	ab
+match	a{,3}b	0	aaab
+match	a{,3}b	0	aaaab
+match	([àb-dX-Z-]{3,5})	0	cà-Y
+match	([àb-dX-Z-]{3,5})	0	àeY
+match	([àb-dX-Z-]{3,5})	0	dcbàX
+match	([àb-dX-Z-]{3,5})	0	efg
+match	((a{3,5})a+)	0	aaaaaa
+match	((a{3,5}?)a+)	0	aaaaaa
+match	((a{3,5}?)a)	0	aaaa
+match	\d{3}	0	123
+match	\d{3}	0	1x3
+match	[-\d]+	0	123-456
+match	[-\d]+	0	123_456
+match	((?i)[a-z]+)	0	ABC
+match	(Foo(?i)f[oB]+)	0	FooFOoBb
+match	([^\]]+)	0	a]c
+match	([^\]]+)	0	abc
+match	((?:foo)+)	0	foofoofoo
+match	((?:foo)+)	0	barbarbar
+match	(foo\Kbar)	0	foobar
+match	(foo\Kbar)	0	bar
+match	((fo+?).*)	0	foooo
+match	((?<!f).)	0	f
+match	((?!f[oa]o)...)	0	foo
+match	((?!f[oa]o)...)	0	qux
+match	(...(?<=f\w.))	0	foo
+match	(...(?<=f\w.))	0	qux
+match	(...(?<!foo))	0	foo
+match	(...(?<!foo))	0	qux
+match	(()*)	0	 
+match	((?=))	0	
+match	([d-ea-dcf-k]+)	0	abcde
+match	((?i)[a-c]+)	0	bCa
+match	([^\x5cx00-\x5cx7F]+)	0	ascii
+match	([^\x5cx00-\x5cx7F]+)	0	←↑→↓
+match	([^\x5cx00-\x5cx7F]+)	0	😄😊😉
+match	([^\u000000-\u00ffff]+)	0	ascii
+match	([^\u000000-\u00ffff]+)	0	←↑→↓
+match	([^\u000000-\u00ffff]+)	0	😄😊😉
+match	((?<year>\d+)-(?<month>\d+)-(?<day>\d+))	0	2019-01-03
+match	(\x5c0\x5cx0A\u00260e\u00260F)	0	\x00\x0a☎☏
+matchs	(a+)-(b+)	0	aa-bb
+matchs	(a+)-(b+)	0	aa-bb!
+search	f.*a(.*o)	0	0	16	0	blahfoobarfoobaz
+search	f.*a(.*o)	0	0	22	0	mais que fais la police
+search	foobaz|foo|foobar	0	0	6	0	foobar
+search	((?=fo[\w]).)	0	0	6	0	barfoo
+search	((?<!\\)(?:\\\\)*")	0	0	5	0	foo\"
+search	($)	0	0	4	0	foo\x0a
+search	((?i)FOO)	0	0	3	0	foo
+search	(.?(?=foo))	0	0	4	0	afoo
+search	((?i)(?=Foo))	0	0	3	0	fOO
+search	(\b(?<!-)(a|b|)(?!-)\b)	0	0	9	0	# foo bar
+search	(.{3,4}|f)oo	0	0	5	0	xxxoo
+search	(.{3,4}|f)oo	0	0	4	0	xfoo
+search	(.{3,4}|f)oo	0	0	7	0	😄xoo
+search	(д)	0	0	2	0	д
+search	ab	0	0	4	0	fa😄ab
+search	.{40}	0	0	41	0	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+searchs	foo	0	0	6	0	xxfoox
+searchs	foo	0	3	6	0	xxfoox
+bsearch	(fo{1,})	0	0	8	0	foo1fooo2
+bsearch	((?<=f)oo(b[ae]r)?(?=baz))	0	0	23	0	foobarbazfoobazfooberbaz
+bsearch	((baz|boz|foo|qux)(?<!baz)(?<!o))	0	0	12	0	quxbozfoobaz
+bsearch	(foo)	0	0	6	0	foofoo
+bsearch	($)	0	0	15	4	foo\x0abar\x0abaz\x0aqux
+bsearch	($)	0	0	15	0	foo\x0abar\x0abaz\x0aqux
+bsearch	(^)	0	0	3	2	foo
+bsearch	(^)	0	0	3	0	foo
+bsearch	(^)	0	0	7	0	foo\x0abar
+bsearch	(\A\w+)	0	0	11	0	foo\x0abar\x0abaz
+bsearch	(\b\w+\z)	0	0	11	0	foo\x0abar\x0abaz
+bsearch	(a[^\x0a]*\x0a|\x0a)	0	0	9	0	foo\x0abar\x0ab
+bsearch	oo(.{3,4}|f)	0	0	5	0	ooxxx
+bsearch	oo(.{3,4}|f)	0	0	4	0	oofx
+bsearch	oo(.{3,4}|f)	0	0	7	0	oox😄
+iter	(a+)	0	0	6	0	aaabbb
+iter	x*	0	0	3	0	axb
+iter	\b\w+\b	0	0	11	0	foo bar baz
+biter	(o+)	0	0	6	0	foobar
+named	((?<year>\d+)-(?<month>\d+))	0	year
+named	((?<year>\d+)-(?<month>\d+))	0	month
+named	((?<year>\d+)-(?<month>\d+))	0	day
+named	(a+)	0	x
+flags	1	1	1	1
+flags	0	0	0	0
+flags	1	0	1	0
+empty		0
+empty	a	0
+echo	a\x00\x09\x0a\xffABC\x7f\x80
+match	[ \H]+	0	abc 
+match	[ \H]+	0	a \x09
+match	([\t-\r]+)	0	\x09\x0a\x0b\x0c\x0d
+match	([\t-\r]\h+[\t-\r])	0	\x0a  \x0c
+match	(a(?<=\N)\N+(?=.\N)\s(?S)d.+(?!.)\s(?<!\N)g)	0	abc\x0adef\x0ag
+match	(a(?<=\N)\N+(?=.\N)\s(?S)d.+(?!.)\s(?<!\N)g)	0	abc\x0adef g
+match	\Q{}[]*+?\Ea+	0	{}[]*+?aa
+match	\Q...	0	...
+match	\Q...	0	bla
+compile	\x8d	0
+compile	\xff	0
+compile	a\xc3	0
+compile	\xe4\xb8	0
+match	\x8d	0	\x8d
+match	\xff	2	\xff
+search	\xc3	0	0	2	0	a\xc3
+bsearch	\x80\x81	0	0	2	0	\x80\x81
+match	a\x8db	0	a\x8db
+match	(a\x8d)	0	a
+match	[\x8d]	0	\x8d
+match	\xc3b	0	\xc3b
+search	(?i)x[a\w]	0	0	2	0	x\xbc
+match	(?i)x[a\w]	0	x\xbc
+match	(?i)x\xc3\x9f	0	x\xdf
+match	(?i)[\xc3\x9f]	0	\xdf
+search	(?i)x[\xc3\x9e-\xc3\xbe]	0	0	2	0	x\xfe
+search	(?i)(?=\xc2\xbc).	0	0	1	0	\xbc
+search	(?i)(?<=\xc2\xbc)x	0	0	2	0	\xbcx
+match	(?i)x\xc2\xbc	0	x\xbc
+search	x[a\w]	0	0	2	0	x\xbc
+search	(?i)x[a\xc3\xa9]	0	0	2	0	x\xa9

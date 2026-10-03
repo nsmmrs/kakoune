@@ -1,0 +1,100 @@
+compile	a*b	0
+compile	a*b	2
+compile	a*b	1
+compile	a*b	4
+compile	a*b	12
+compile	(.{3,4}|f)oo	0
+compile	oo(.{3,4}|f)	4
+compile	((?<y>\d+)-(?<m>\d+))	0
+compile	(?=a*)	0
+compile	(?=(a))	0
+compile	(?=a|b)	0
+compile	a{1001}	0
+compile	[\t-\r]\h+[\t-\r]	0
+compile		0
+compile	\A\w+\z	0
+exec	a+	0	1	0	3	0	3	0	aaab
+exec	a+	0	5	0	4	0	4	0	aaab
+exec	a+	0	9	0	4	0	4	0	aaab
+exec	a+	0	13	0	4	0	4	0	aaab
+exec	a+	0	17	0	4	0	4	0	aaab
+exec	a+	0	21	0	4	0	4	0	aaab
+exec	a+	0	25	0	4	0	4	0	aaab
+exec	a+	0	29	0	4	0	4	0	aaab
+exec	a+	4	2	0	4	0	4	0	aaab
+exec	a+	4	6	0	4	0	4	0	aaab
+exec	a+	4	10	0	4	0	4	0	aaab
+exec	a+	4	14	0	4	0	4	0	aaab
+exec	a+	4	18	0	4	0	4	0	aaab
+exec	a+	4	22	0	4	0	4	0	aaab
+exec	a+	4	26	0	4	0	4	0	aaab
+exec	a+	4	30	0	4	0	4	0	aaab
+exec	^b	0	5	1	3	0	3	0	ab
+exec	^b	0	5	1	3	0	3	2	ab
+exec	b$	0	5	0	2	0	3	0	abc
+exec	b$	0	5	0	2	0	3	4	abc
+exec	\bbar\b	0	5	0	7	0	7	0	foo bar
+exec	\bbar\b	0	5	4	7	0	7	8	foo bar
+exec	foo	0	5	1	2	0	6	0	foofoo
+exec	foo	4	6	0	6	0	6	0	foofoo
+exec	(o+)	4	6	0	6	0	6	0	foobar
+exec	($)	0	5	0	4	0	4	0	foo\x0a
+exec	($)	4	6	0	15	0	15	4	foo\x0abar\x0abaz\x0aqux
+exec	\A\w+	4	6	0	11	0	11	0	foo\x0abar\x0abaz
+exec	\b\w+\z	4	6	0	11	0	11	0	foo\x0abar\x0abaz
+exec	((?i)FOO)	0	5	0	3	0	3	0	foo
+exec	((?i)(?=Foo))	0	5	0	3	0	3	0	fOO
+exec	(?=a*)	0	5	0	1	0	1	0	a
+exec	a{2}	1	5	0	4	0	4	0	aaaa
+exec	a{2}	3	5	0	4	0	4	0	aaaa
+exec	a	0	5	0	0	0	1	32	a
+exec	a*	0	5	0	0	0	1	32	a
+ctype	4	65
+ctype	4	97
+ctype	4	48
+ctype	4	95
+ctype	4	32
+ctype	4	233
+ctype	4	937
+ctype	4	12354
+ctype	64	65
+ctype	64	32
+ctype	8	48
+ctype	8	65
+ctype	8	1632
+ctype	8	178
+ctype	128	48
+ctype	1	32
+ctype	1	9
+ctype	1	10
+ctype	1	160
+ctype	1	65
+ctype	16	32
+ctype	2	32
+ctype	2	10
+ctype	2	160
+ctype	32	32
+ctype	32	65
+ctype	255	65
+ctype	255	233
+ctype	255	32
+ctype	0	65
+ctype	4	0
+ctype	4	1114111
+ctype	4	1114120
+ctype	8	1114111
+ctype	1	1114111
+echo	a\x00\x09\x0a\xffABC\x7f\x80
+compile	\x8d	0
+compile	a\xc3	2
+compile	\xff	12
+exec	\xff	0	5	0	1	0	1	0	\xff
+exec	\xc3	2	13	0	2	0	2	0	a\xc3
+exec	a\x8db	0	5	0	3	0	3	0	a\x8db
+exec	a+	0	5	-2	99	0	4	0	aaab
+exec	a+	0	5	3	1	0	4	0	aaab
+exec	^a	0	1	0	0	0	0	0	a
+exec	b$	0	5	2	2	0	2	0	ab
+exec	(?i)x[a\w]	0	5	0	2	0	2	0	x\xbc
+exec	(?i)x[\xc3\x9e-\xc3\xbe]	0	5	0	2	0	2	0	x\xfe
+exec	x[a\w]	0	5	0	2	0	2	0	x\xbc

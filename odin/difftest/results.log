@@ -127,6 +127,69 @@ Harness/driver bugs found and fixed during bring-up (not port bugs):
   claim. Replaced with a stable string offset; reproducibility
   verified (two runs, identical mismatch counts).
 
+Difftest findings, wave 5 round 3 (2026-10-03, coordinator triage)
+===============================================================
+Base: wave 5a closeout (651 tests). Toolchain: g++ 16.2.1,
+odin dev-2026-09, python 3.14.7. C++ locale for regex/regex_vm:
+en_US.utf8 (harnesses pin LC_ALL, stderr-verified).
+
+Modules covered: 5 new (regex, regex_vm, faces, keymap_manager,
+parameters_parser) + re-runs of ranked_match, utf8.
+New seeds: 174 regex + 100 regex_vm + 100 faces + 36
+keymap_manager + 34 parameters_parser (UnitTest-mined + hand-built
+edges, incl. invalid-UTF8 pattern/subject soup for regex).
+Full runs (count 20000, seeds 20261003 and 777): 5x ~20k vectors,
+0 mismatches after the fixes below. faces/keymap_manager/
+parameters_parser agreed from the first run; every regex-family
+mismatch traced to a real port bug, all fixed with regression tests.
+
+Bugs found and fixed (all verified by re-fuzz to zero + `odin test`):
+- face_registry_remove heap corruption: the entry value was freed
+  before delete_key, leaving a ghost that a later lookup returned
+  (use-after-free). Fix: delete the key first, then free.
+  Regression: face_registry_test_remove_repeated_no_ghost.
+- utf8 character_start(s, len(s)) (round-2 known mismatch): C++
+  stops at once (reads NUL past end()); the port walked back.
+  Fix: stop at end of input. Regression: utf8_test_character_start.
+  utf8 now fully PASS (20143/20143, was 131 mismatches).
+- face_registry word-char validation read names as signed bytes,
+  accepting high-byte garbage the C++ rejects. Fix: byte-wise
+  compare. Regression: face_registry_test_high_byte_names_rejected.
+- regex parser rejected invalid-UTF8 patterns the C++ accepts.
+  Root cause: C++ read_codepoint (src/utf8.hh:86) does NOT forward
+  its InvalidPolicy to read_codepoint_multibyte, so only
+  end-of-input dereferences throw; orphan bytes and truncated
+  sequences decode blindly (sign-extended negatives). The parser
+  advances byte-wise (to_next) over those values. Fix: decode
+  blindly in regex_vm_parser_decode; error only at end of input.
+  Related: the C++ stores literals in a 24-bit field, so an orphan
+  literal (0xFFFFFFxx) truncates to 0xFFFFxx and can never match
+  (proven: `match \x8d \x8d` -> NO); the port truncates likewise,
+  and Desc/class-range limits compare unsigned like char32_t.
+  Regression: regex_test_invalid_utf8_lenient.
+- (?i) folding of orphan bytes: C++ towlower passes invalid values
+  through unchanged, while the port wrapped negatives into the
+  ASCII table. Fix: unicode_to_lower/to_upper compare the 128 limit
+  unsigned so negatives take the wide path (core:unicode passes
+  them through bit-identical, probed). The is_word/iswdigit
+  predicates keep the signed compare deliberately: negatives fail
+  the ASCII branch, matching iswalnum/iswdigit(invalid) == 0.
+- iswalnum/iswdigit vs core:unicode (all remaining ctype + \w\W\D
+  search mismatches): exhaustive probing of glibc en_US.utf8 over
+  U+0000..U+10FFFF against core:unicode queries showed iswdigit is
+  exactly ASCII 0-9 (0 non-ASCII members) and iswalnum is letters +
+  decimal digits + letter numbers (Nl) + letter-like marks, while
+  generic diacritics and other numbers (No: superscripts, vulgar
+  fractions) are excluded. Fix: regex_vm_is_digit is ASCII-only;
+  new unicode_is_alnum (letters + Nd + a 1586-codepoint / 263-range
+  add-table for Nl and letter-like marks, binary-searched) agrees
+  with glibc on all 1,114,112 codepoints, 0 diffs. unicode_is_word
+  and ranked_match_is_alnum share it (ranked_match re-fuzzed clean:
+  20053/20053; one stale test asserting is_word('²') was corrected
+  to the C++-observed false, with new edge cases).
+
+No accepts this round: every mismatch was a port bug with a fix.
+
 Machine run log follows (fuzz.py --results appends here):
 --------------------------------------------------------
 fuzz.py seed=20261003 count=20000 modules=hash,diff,ranked_match,json
@@ -184,3 +247,12 @@ utf8: 20143 vectors (143 seeds), 131 mismatches
   vector #1785 in='charstart\t\\xc3\\x85\t2' c++='2' odin='0'
   vector #1925 in='charstart\tfU-UMkAdR\\x09\\xc3G\t12' c++='12' odin='11'
 RESULT: FAIL
+fuzz.py seed=20261003 count=20000 modules=regex,regex_vm,faces,keymap_manager,parameters_parser,ranked_match,utf8
+regex: 20174 vectors (174 seeds), 0 mismatches
+regex_vm: 20100 vectors (100 seeds), 0 mismatches
+faces: 20100 vectors (100 seeds), 0 mismatches
+keymap_manager: 20036 vectors (36 seeds), 0 mismatches
+parameters_parser: 20034 vectors (34 seeds), 0 mismatches
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+utf8: 20143 vectors (143 seeds), 0 mismatches
+RESULT: PASS

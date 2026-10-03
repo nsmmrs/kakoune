@@ -1,14 +1,15 @@
-# C++-vs-Odin differential fuzzing for wave-1/wave-2 ports
+# C++-vs-Odin differential fuzzing for wave-1/wave-2/wave-4 ports
 
 Each covered module has a pair of harnesses with an identical line protocol:
 
 - `hash/`, `diff/`, `ranked_match/`, `json/`, `format/`, `ranges/`,
-  `utf8/` each contain:
+  `utf8/`, `regex/`, `regex_vm/`, `faces/`, `keymap_manager/`,
+  `parameters_parser/` each contain:
   - `harness.cc` — compiled with `g++` against the **real** `src/` code.
   - `main.odin` — `package main`, imports the port via
     `import kak "kaksrc:kak"`; run with `odin run` or `odin build`.
   - `vectors.txt` — seed vectors, mostly mined from the C++ `UnitTest`s.
-- `fuzz.py` — build + fuzz driver. Builds all 14 binaries, feeds
+- `fuzz.py` — build + fuzz driver. Builds all 24 binaries, feeds
   seeds + generated random inputs to both sides, diffs outputs.
 - `results.log` — findings, per-module verdicts, and the run log.
 
@@ -63,6 +64,20 @@ Ops per module (see each `harness.cc` header comment for details):
   `size_byte`, `size_cp`, `next`, `finish`, `previous`,
   `charstart`, `advance`, `distance`, `prevcp`, `dump`, `width`,
   `coldist`, `advcol`, `echo`
+- regex: `compile` (prints marks/saves/named captures, or
+  `ERR <what>`), `match`, `matchs`, `search`, `searchs`,
+  `bsearch`, `iter`/`biter` (print `N <k> [...]`), `named`,
+  `flags`, `empty`, `echo`
+- regex_vm: `compile` (prints saves/inst-count/classes/lookarounds/
+  start-descs), `exec` (all 16 direction/search/anymatch/nosaves
+  modes), `ctype`, `echo`
+- faces: `merge`, `tostring`, `attrstr`, `parse`, `lookup`, `add`,
+  `chain`, `flatten`, `child`, `echo` (no remove op: the Odin
+  `face_registry_remove` corrupts the registry — see results.log)
+- keymap_manager: `mapget`, `unmapget`, `unmapall`, `mapped`,
+  `usermode`, `parent`, `echo`
+- parameters_parser: `parse`, `parseie` (ignore_errors),
+  `gendoc`, `echo`
 
 Single-shot examples (equivalent; the driver uses the binaries for
 speed, `--smoke-odin-run` proves they match `odin run`):
@@ -85,6 +100,22 @@ g++ -std=c++20 -O1 -Isrc odin/difftest/format/harness.cc src/format.cc src/strin
     src/string_utils.cc src/memory.cc src/exception.cc -o bin/format_cc
 g++ -std=c++20 -O1 -Isrc odin/difftest/ranges/harness.cc -o bin/ranges_cc
 g++ -std=c++20 -O1 -Isrc odin/difftest/utf8/harness.cc -o bin/utf8_cc
+g++ -std=c++20 -O1 -Isrc odin/difftest/regex/harness.cc src/regex.cc src/regex_vm.cc \
+    src/string.cc src/string_utils.cc src/memory.cc src/exception.cc src/format.cc \
+    src/hash.cc -o bin/regex_cc
+g++ -std=c++20 -O1 -Isrc odin/difftest/regex_vm/harness.cc src/regex_vm.cc src/string.cc \
+    src/string_utils.cc src/memory.cc src/exception.cc src/format.cc src/hash.cc \
+    -o bin/regex_vm_cc
+g++ -std=c++20 -O1 -Isrc odin/difftest/faces/harness.cc src/face_registry.cc src/color.cc \
+    src/string.cc src/string_utils.cc src/memory.cc src/exception.cc src/format.cc \
+    src/hash.cc -o bin/faces_cc
+g++ -std=c++20 -O1 -Isrc odin/difftest/keymap_manager/harness.cc src/keymap_manager.cc \
+    src/keys.cc src/string.cc src/string_utils.cc src/memory.cc src/exception.cc \
+    src/format.cc src/hash.cc -o bin/keymap_manager_cc
+g++ -std=c++20 -O1 -Isrc odin/difftest/parameters_parser/harness.cc \
+    src/parameters_parser.cc src/string.cc src/string_utils.cc src/memory.cc \
+    src/exception.cc src/format.cc src/hash.cc src/ranked_match.cc \
+    -o bin/parameters_parser_cc
 ```
 
 (`-w` silences a pre-existing `-Winit-list-lifetime` warning in
@@ -182,6 +213,68 @@ odin build odin/difftest/<module> -collection:kaksrc=<repo>/odin -out:bin/<modul
   read there; the Odin port clamps at 0). `coldist`/`advcol` have no
   `utf8.odin` counterpart: their loops are transcribed in
   `main.odin` over the ported decode + width primitives.
+- **regex locale.** Like ranked_match, the C++ engine uses libc
+  wide-character classes (`iswalnum` for `\w`/`\b`, `iswdigit` for
+  `\d`, `towlower` for `(?i)`); both regex harnesses pin `LC_ALL` to
+  `en_US.utf8` (fallback `C.utf8`). The port documents
+  `core:unicode` tables as its deliberate deviation outside ASCII.
+- **regex windows.** `exec` search windows are always nested inside
+  the subject window, like every real caller: a search outside the
+  subject is C++ UB (the boundary assertions read `pos-1`/`pos`)
+  and panics the Odin port (`regex_vm.odin` bounds check). Repro:
+  `exec\t^\t0\t1\t0\t0\t4\t4\t0\tabcdef` (C++ `NO`, Odin
+  panic). Windows may still split characters and dangle off the
+  ends (the harness clamps); `NoForward` is stripped for forward
+  exec ops and `Backward` is forced for backward ones, on both
+  sides.
+- **regex invalid patterns.** The Odin parser reports `Invalid utf8
+  in regex` for invalid lead bytes and truncated sequences that the
+  C++ accepts: `read_codepoint`'s inner `read_codepoint_multibyte`
+  call drops the throwing policy (it uses default `Pass`), so only
+  end-of-input dereferences throw in C++. Fuzz patterns stay in the
+  agreement domain (checked by `_rx_pattern_decodable`); 8 seeds pin
+  the gap, plus agreement pins for orphan continuations (skipped by
+  both sides) and blind-masked sequences (surrogates, `\xc3(`).
+- **regex ctype census.** `ctype` compares `is_ctype` over raw
+  8-bit masks; all 32,768 ASCII (mask, cp) pairs agree exhaustively.
+  Non-ASCII pairs split exactly on the documented
+  libc-vs-tables gap (single-bit and multi-bit masks verified
+  against an independent `Kakoune::is_ctype` oracle).
+- **faces construction.** `FaceRegistry`'s root constructor is
+  private (`friend Scope`), so the C++ harness defines `private` to
+  `public` around the include — access specifiers do not affect
+  layout, so the exercised code is the real one. Same for
+  `KeymapManager`. Error `what()` strings are mapped onto the Odin
+  enums (`invalid face description` → `Invalid_Description`,
+  `no such face attribute` → `Unknown_Attribute`, color failures →
+  `Invalid_Color`, `already defined` → `Already_Defined`,
+  `invalid face name` → `Invalid_Name`, `face cycle detected` →
+  `Face_Cycle`; keymap `... is already a regular mode` →
+  `Regular_Mode`, `user mode ... already defined` →
+  `Already_Defined`, `invalid mode name` → `Invalid_Name`).
+- **faces domains.** Descriptions placing `,` or `+` after `@` are
+  excluded: the C++ builds a reversed range / walks off the end
+  (the Odin port reports `Invalid_Description`, a documented
+  deviation). Face hashes are not compared: attribute bit positions
+  are an implementation detail that differs by design on both sides.
+  `flatten` entries are name-sorted in the harness (hash iteration
+  order differs).
+- **faces high bytes.** Bytes ≥ 0x80 take different word-class
+  paths (`is_word` is false in C++ for negative `char`, Unicode
+  tables in Odin), so fuzz descriptions/names are ASCII (controls
+  included); 8 seeds pin the gap plus control-byte agreement pins.
+- **keymap_manager order.** Listings are sorted by `Key::val()` in
+  the harness (hash iteration order differs); modes are 0..10,
+  modifiers/`user_modes` output is insertion-ordered.
+- **parameters_parser surface.** Error classes (not messages) are
+  compared: `unknown_option`, `missing_option_value`,
+  `wrong_argument_count` are distinct C++ types, duplicates are
+  `runtime_error`. `state()` is never called on an empty C++ parse
+  (it dereferences an empty `Optional` — UB); the harness prints
+  `NONE` there, matching the port. Valued switches use a dummy
+  `ArgCompleter` (the parser only observes its presence).
+  `gendoc` lines are byte-sorted in the harness and ASCII-only (its
+  alignment uses display widths, same `wcwidth` reason as utf8).
 
 ## Reproducing a mismatch
 

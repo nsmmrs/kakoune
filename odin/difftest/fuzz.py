@@ -8,7 +8,9 @@ feeds seed vectors from vectors.txt plus generated random inputs, and
 diffs the outputs line by line.
 
 Usage:
-  python3 fuzz.py [--modules hash,diff,ranked_match,json,format,ranges,utf8]
+  python3 fuzz.py [--modules hash,diff,ranked_match,json,format,ranges,utf8,
+                               regex,regex_vm,faces,keymap_manager,
+                               parameters_parser]
                   [--count N] [--seed S] [--max-mismatch K] [--no-build]
                   [--smoke-odin-run] [--results results.log]
 
@@ -63,6 +65,40 @@ MODULES = {
     "utf8": {
         "cc_srcs": ["odin/difftest/utf8/harness.cc"],
         "gen": "gen_utf8",
+    },
+    "regex": {
+        "cc_srcs": ["odin/difftest/regex/harness.cc", "src/regex.cc",
+                    "src/regex_vm.cc", "src/string.cc", "src/string_utils.cc",
+                    "src/memory.cc", "src/exception.cc", "src/format.cc",
+                    "src/hash.cc"],
+        "gen": "gen_regex",
+    },
+    "regex_vm": {
+        "cc_srcs": ["odin/difftest/regex_vm/harness.cc", "src/regex_vm.cc",
+                    "src/string.cc", "src/string_utils.cc", "src/memory.cc",
+                    "src/exception.cc", "src/format.cc", "src/hash.cc"],
+        "gen": "gen_regex_vm",
+    },
+    "faces": {
+        "cc_srcs": ["odin/difftest/faces/harness.cc", "src/face_registry.cc",
+                    "src/color.cc", "src/string.cc", "src/string_utils.cc",
+                    "src/memory.cc", "src/exception.cc", "src/format.cc",
+                    "src/hash.cc"],
+        "gen": "gen_faces",
+    },
+    "keymap_manager": {
+        "cc_srcs": ["odin/difftest/keymap_manager/harness.cc",
+                    "src/keymap_manager.cc", "src/keys.cc", "src/string.cc",
+                    "src/string_utils.cc", "src/memory.cc", "src/exception.cc",
+                    "src/format.cc", "src/hash.cc"],
+        "gen": "gen_keymap_manager",
+    },
+    "parameters_parser": {
+        "cc_srcs": ["odin/difftest/parameters_parser/harness.cc",
+                    "src/parameters_parser.cc", "src/string.cc",
+                    "src/string_utils.cc", "src/memory.cc", "src/exception.cc",
+                    "src/format.cc", "src/hash.cc", "src/ranked_match.cc"],
+        "gen": "gen_parameters_parser",
     },
 }
 
@@ -679,6 +715,816 @@ def gen_utf8(rng, count):
     return vecs
 
 
+# ---------------------------------------------------------------- regex shared
+
+_RX_LIT = [b"a", b"b", b"c", b"f", b"x", b"o", b"0", b"1", b"7",
+           b" ", b".", b"-", b"_", b"/", b"e", b"A", b"B", b"Z",
+           b"9", b":", b"Z"]
+_RX_LIT_UNI = ["é".encode(), "ü".encode(), "中".encode(), "🙂".encode(),
+               "д".encode(), "ß".encode(), "Ω".encode(), "à".encode(),
+               "İ".encode(), "Σ".encode(), "ﬁ".encode(), "ő".encode()]
+_RX_META_ESC = [b"\\.", b"\\*", b"\\+", b"\\?", b"\\(", b"\\)", b"\\[",
+                b"\\]", b"\\{", b"\\}", b"\\|", b"\\\\", b"\\^", b"\\$"]
+_RX_CTRL_ESC = [b"\\f", b"\\n", b"\\r", b"\\t", b"\\v", b"\\0", b"\\cA",
+                b"\\cm", b"\\cZ", b"\\x41", b"\\x00", b"\\x7f",
+                b"\\u000041", b"\\u01F642", b"\\u0000e9"]
+_RX_CTYPES = [b"\\d", b"\\D", b"\\w", b"\\W", b"\\s", b"\\S", b"\\h",
+              b"\\H", b"\\N"]
+_RX_ANCHORS = [b"^", b"$", b"\\A", b"\\z", b"\\b", b"\\B"]
+_RX_QUANTS = [b"", b"", b"*", b"+", b"?", b"*?", b"+?", b"??",
+              b"{0}", b"{1}", b"{2}", b"{3}", b"{0,1}", b"{1,2}",
+              b"{2,4}", b"{0,}", b"{1,}", b"{2,}", b"{,2}", b"{,}",
+              b"{2}?", b"{1,3}?", b"{5}", b"{3,2}", b"{0,0}"]
+_RX_BIG_QUANTS = [b"{999}", b"{1000}", b"{1001}", b"{0,1000}",
+                  b"{0,1001}"]
+_RX_MODIFIERS = [b"(?i)", b"(?I)", b"(?s)", b"(?S)", b"(?is)",
+                 b"(?iS)", b"(?si)"]
+_RX_CLASS_ESC = [b"\\d", b"\\w", b"\\s", b"\\h", b"\\D", b"\\W",
+                 b"\\S", b"\\H", b"\\t", b"\\n", b"\\r", b"\\x41",
+                 b"\\u00007a", b"\\\\", b"\\-", b"\\]", b"\\^"]
+_RX_CLASS_SINGLE = [b"a", b"z", b"A", b"Z", b"0", b"9", b"_", b" ",
+                    b".", b"/", b"[", b"(", "é".encode(), "ß".encode()]
+_RX_RANGES = [(b"a", b"z"), (b"A", b"Z"), (b"0", b"9"), (b"a", b"c"),
+              (b"b", b"d"), (b"X", b"Z"), (b"0", b"1"), (b"/", b"9")]
+
+# Invalid patterns: every C++ parse_error message should appear.
+_RX_INVALID = [b"(a", b"[a", b"a{2", b"\\Qab", b"(?<n", b"(?<n>x",
+               b"(?=", b"(?<!a", b"\\q", b"\\E", b"\\k", b"a\\",
+               b"[\\b]", b"[\\N]", b"[\\B]", b"[z-a]", b"a{", b"a{-1}",
+               b"a{2x}", b"*a", b"a**", b")", b"]", b"a}", b"(?P<n>)",
+               b"(?<>", b"(?<a-b>)", b"(?=a*)", b"(?=(a))",
+               b"(?=a|b)", b"a{1001}", b"\\x4", b"\\xz1", b"\\u123",
+               b"\\c", b"\\c1", b"[a-", b"\\", b"(?i", b"a{1,2",
+               b"(a))", b"((a)", b"[", b"(?<9lives>a)", b"(?<!a{2})"]
+
+
+def _rx_class(rng):
+    n = rng.randint(1, 4)
+    parts = []
+    if rng.random() < 0.25:
+        parts.append(b"^")
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.28:
+            a, b = rng.choice(_RX_RANGES)
+            parts.append(a + b"-" + b)
+        elif r < 0.45:
+            parts.append(rng.choice(_RX_CLASS_SINGLE))
+        elif r < 0.62:
+            parts.append(rng.choice(_RX_CLASS_ESC))
+        elif r < 0.72:
+            parts.append(b"-")
+        elif r < 0.82 and _RX_LIT_UNI:
+            parts.append(rng.choice(_RX_LIT_UNI))
+        else:
+            a = rng.choice(_RX_LIT)
+            parts.append(a + b"-" + a)
+    return b"[" + b"".join(parts) + b"]"
+
+
+def _rx_look_body(rng):
+    # Lookarounds admit only literals, any-chars and classes, with no
+    # quantifiers or alternations.
+    n = rng.randint(0, 3)
+    parts = []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.5:
+            parts.append(rng.choice(_RX_LIT))
+        elif r < 0.65:
+            parts.append(b".")
+        elif r < 0.8:
+            parts.append(_rx_class(rng))
+        else:
+            parts.append(rng.choice(_RX_CTRL_ESC + _RX_META_ESC))
+    return b"".join(parts)
+
+
+def _rx_atom(rng):
+    r = rng.random()
+    if r < 0.30:
+        if rng.random() < 0.2:
+            return rng.choice(_RX_LIT_UNI)
+        return rng.choice(_RX_LIT)
+    if r < 0.38:
+        return rng.choice(_RX_META_ESC)
+    if r < 0.44:
+        return rng.choice(_RX_CTRL_ESC)
+    if r < 0.54:
+        return rng.choice(_RX_CTYPES)
+    if r < 0.58:
+        return b"."
+    if r < 0.68:
+        return _rx_class(rng)
+    if r < 0.72:
+        return rng.choice(_RX_ANCHORS)
+    if r < 0.75:
+        return b"\\K"
+    if r < 0.78:
+        lit = b"".join(rng.choice(_RX_LIT) for _ in range(rng.randint(1, 4)))
+        if rng.random() < 0.7:
+            return b"\\Q" + lit + b"\\E"
+        return b"\\Q" + lit
+    if rng.random() < 0.2:
+        return rng.choice(_RX_LIT_UNI)
+    return rng.choice(_RX_LIT)
+
+
+def _rx_disjunction(rng, depth):
+    n = 1 if depth >= 3 or rng.random() < 0.6 else 2
+    return b"|".join(_rx_sequence(rng, depth) for _ in range(n))
+
+
+def _rx_sequence(rng, depth):
+    n = rng.randint(1, 4)
+    parts = []
+    if rng.random() < 0.12:
+        parts.append(rng.choice(_RX_MODIFIERS))
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.7 or depth >= 3:
+            atom = _rx_atom(rng)
+            if atom in _RX_ANCHORS or atom == b"\\K":
+                parts.append(atom)
+            else:
+                q = rng.choice(_RX_QUANTS)
+                if q == b"" and rng.random() < 0.03:
+                    q = rng.choice(_RX_BIG_QUANTS)
+                parts.append(atom + q)
+        elif r < 0.82:
+            inner = _rx_disjunction(rng, depth + 1)
+            k = rng.random()
+            if k < 0.5:
+                g = b"(" + inner + b")"
+            elif k < 0.7:
+                g = b"(?:" + inner + b")"
+            else:
+                nm = "".join(rng.choice("abcXYZ019_")
+                              for _ in range(rng.randint(1, 6))).encode()
+                g = b"(?<" + nm + b">" + inner + b")"
+            parts.append(g + rng.choice(_RX_QUANTS))
+        else:
+            op = rng.choice([b"(?=", b"(?!", b"(?<=", b"(?<!"])
+            parts.append(op + _rx_look_body(rng) + b")")
+    return b"".join(parts)
+
+
+def _rx_pattern_decodable(data):
+    """Whether every decode position holds ASCII or a complete lead
+    sequence (the Odin parser's accept rule). Advances skip trailing
+    continuation bytes like C++ to_next, so orphans after a consumed
+    char never decode. C++ agrees with Odin on all accepted inputs;
+    on rejected inputs C++ Pass-accepts (the inner
+    read_codepoint_multibyte call drops the throwing policy) while
+    Odin reports 'Invalid utf8 in regex'."""
+    pos, n = 0, len(data)
+    while pos < n:
+        b = data[pos]
+        if b & 0x80 == 0:
+            pos += 1
+            continue
+        if b & 0xE0 == 0xC0:
+            size = 2
+        elif b & 0xF0 == 0xE0:
+            size = 3
+        elif b & 0xF8 == 0xF0:
+            size = 4
+        else:
+            return False
+        if pos + size > n:
+            return False
+        pos += 1
+        while pos < n and data[pos] & 0xC0 == 0x80:
+            pos += 1
+    return True
+
+
+def _rx_pattern(rng):
+    r = rng.random()
+    if r < 0.12:
+        # Invalid pattern: fixed specimen, truncation, or mutation.
+        # Truncations/mutations that break UTF-8 decodability are
+        # retried: undecodable patterns are an Odin-stricter class
+        # (C++ Pass-accepts them), pinned by seeds instead.
+        for _ in range(10):
+            k = rng.random()
+            if k < 0.5:
+                cand = rng.choice(_RX_INVALID)
+            else:
+                p = _rx_disjunction(rng, 0)
+                if k < 0.75 and len(p) > 1:
+                    cand = p[:rng.randint(1, len(p) - 1)]
+                else:
+                    p = bytearray(p)
+                    if p and rng.random() < 0.7:
+                        p[rng.randrange(len(p))] = rng.choice(
+                            b"([{\\?*+|")
+                    else:
+                        pos = rng.randrange(len(p) + 1)
+                        p[pos:pos] = bytes([rng.choice(b"([{\\?*+|")])
+                    cand = bytes(p)
+            if _rx_pattern_decodable(cand):
+                return cand
+        return rng.choice(_RX_INVALID)
+    if r < 0.20:
+        # Case-insensitivity focus: (?i)/(?I) over mixed-case literals.
+        lit = b"".join(rng.choice([b"a", b"A", b"b", b"B", b"c", b"C",
+                                   b"z", b"Z", b"0", b"e", b"E"])
+                       for _ in range(rng.randint(1, 5)))
+        mod = rng.choice([b"(?i)", b"(?i)", b"(?I)"])
+        return mod + lit + rng.choice(_RX_QUANTS)
+    if r < 0.26:
+        # Boundary focus: anchors over word-ish soup.
+        return rng.choice(_RX_ANCHORS) + _rx_sequence(rng, 1) + \
+            rng.choice(_RX_ANCHORS + [b""])
+    return _rx_disjunction(rng, 0)
+
+
+def _rx_subject(rng, pattern=b""):
+    alpha = bytearray(b"abfox019 \t.,_-")
+    for b in pattern:
+        if 32 <= b <= 126 and b not in b"\\()[]{}|+*?^$.":
+            alpha.append(b)
+    alpha += b"\xc3\xa9\xc3\xbc\xe4\xb8\xad"
+    r = rng.random()
+    n = rng.randint(0, 40)
+    if r < 0.15:
+        # Word soup for \b.
+        words = []
+        for _ in range(rng.randint(0, 5)):
+            wlen = rng.randint(0, 8)
+            words.append(bytes(rng.choice(b"abcXYZ019_")
+                               for _ in range(wlen)))
+        sep = rng.choice([b" ", b"  ", b", ", b".", b"-", b"\n", b""])
+        return sep.join(words)[:40]
+    if r < 0.30:
+        # Multiline: 1-4 lines joined by \n.
+        lines = []
+        for _ in range(rng.randint(1, 4)):
+            llen = rng.randint(0, 12)
+            lines.append(bytes(rng.choice(alpha) for _ in range(llen)))
+        return b"\n".join(lines)[:40]
+    if r < 0.38 and pattern:
+        # Derived from the pattern's own literals.
+        lits = bytes(b for b in pattern
+                     if 32 <= b <= 126 and b not in b"\\()[]{}|+*?^$.")
+        if lits:
+            base = bytes(rng.choice(lits) for _ in
+                         range(rng.randint(0, 12)))
+            return _mutate(rng, base, alphabet=bytes(alpha),
+                           n_edits=2)[:40]
+    if r < 0.46:
+        # Mixed case for (?i).
+        words = []
+        for _ in range(rng.randint(0, 4)):
+            w = "".join(rng.choice("aAbBcCeEzZ019")
+                        for _ in range(rng.randint(0, 8))).encode()
+            words.append(w)
+        return b" ".join(words)[:40]
+    out = bytes(rng.choice(alpha) for _ in range(n))
+    if rng.random() < 0.10:
+        out += rng.choice(_BAD_UTF8)
+    if rng.random() < 0.08 and len(out) < 40:
+        pos = rng.randint(0, len(out))
+        out = out[:pos] + b"\x00" + out[pos:]
+    return out[:40]
+
+
+# Focused census slices. (1) The tolower-wrap bug: (?i) patterns with
+# ranges-bearing classes or non-ASCII literals over subjects holding
+# lone high bytes (which Pass-decode to negative runes; Odin wraps
+# them to Latin-1, C++ passes the huge value through). (2) Valid
+# non-ASCII (?i): case pairs the libc-vs-table deviation could split.
+# (3) Valid non-ASCII ctype: \w \d \b over letters/digits outside
+# ASCII (the documented iswalnum/iswdigit-vs-tables gap).
+_RX_WRAP_PATS = [b"(?i)x[a\\w]", b"(?i)x[a\\d]", b"(?i)x[0\\W]",
+                 b"(?i)x[A\\S]", b"(?i)x[a\\W]",
+                 "(?i)x[À-Þ]".encode(), "(?i)x[ß-ÿ]".encode(),
+                 "(?i)x[¼-¾]".encode(), "(?i)x[Þ-þ]".encode(),
+                 "(?i)x[±-»]".encode(), "(?i)x[µ-ÿ]".encode(),
+                 "(?i)x¼".encode(), "(?i)xß".encode(),
+                 "(?i)xé".encode(), "(?i)xþ".encode(),
+                 "(?i)xÿ".encode(), "(?i)[ß]".encode(),
+                 "(?i)(?=¼).".encode(), "(?i)(?<=¼)x".encode(),
+                 "(?i)x(?=ß).".encode()]
+_RX_WRAP_INFIX = [bytes([b]) for b in
+                  (0x80, 0x9C, 0xA9, 0xB2, 0xB3, 0xB9, 0xBC, 0xBE,
+                   0xC0, 0xDE, 0xDF, 0xE0, 0xFE, 0xFF)]
+_RX_CI_WORDS = ["ß".encode(), "ẞ".encode(), "ss".encode(), "SS".encode(),
+                "İ".encode(), "i".encode(), "I".encode(),
+                "Σ".encode(), "σ".encode(), "ς".encode(),
+                "ſ".encode(), "S".encode(), "s".encode(),
+                "é".encode(), "É".encode(), "ü".encode(),
+                "Ω".encode(), "ω".encode(), "д".encode(), "Д".encode()]
+_RX_NW_WORDS = ["¼".encode(), "¹".encode(), "²".encode(), "⅐".encode(),
+                "é".encode(), "ß".encode(), "中".encode(), "д".encode(),
+                "Ω".encode(), "ﬁ".encode(), "ő".encode(), "a".encode(),
+                "0".encode(), "_".encode(), " ".encode()]
+
+
+def _rx_focused(rng):
+    """Return a (pattern, subject-core) census pair, or None."""
+    r = rng.random()
+    if r < 0.045:
+        pat = rng.choice(_RX_WRAP_PATS)
+        infix = rng.choice(_RX_WRAP_INFIX)
+        if pat.startswith(b"(?i)(?<="):
+            core = infix + b"x"
+        elif pat.startswith(b"(?i)(?="):
+            core = infix
+        elif pat == "(?i)[ß]".encode():
+            core = infix
+        else:
+            core = b"x" + infix
+        return pat, core
+    if r < 0.065:
+        # Valid-Unicode (?i): literal/case pair both sides of a fold.
+        a = rng.choice(_RX_CI_WORDS)
+        b = rng.choice(_RX_CI_WORDS)
+        return b"(?i)" + a, b
+    if r < 0.085:
+        # Valid-Unicode ctype: classes over non-ASCII words/digits.
+        cls = rng.choice([b"[\\w]", b"[\\d]", b"[\\w]+", b"\\b\\w+\\b",
+                          b"[\\W]", b"[\\D]", b"\\b", b"\\w\\b\\w"])
+        core = b"".join(rng.choice(_RX_NW_WORDS)
+                        for _ in range(rng.randint(1, 4)))
+        return cls, core
+    return None
+
+
+def _rflags(rng, backward_ok):
+    r = rng.random()
+    if r < 0.60:
+        return 0
+    if r < 0.75:
+        return 2
+    if r < 0.83:
+        return 1
+    if backward_ok and r < 0.91:
+        return 4
+    return rng.choice([3, 5, 6, 7, 12 if backward_ok else 3])
+
+
+def gen_regex(rng, count):
+    vecs = []
+    for _ in range(count):
+        r = rng.random()
+        if r < 0.15:
+            op = "compile"
+        elif r < 0.40:
+            op = "match"
+        elif r < 0.45:
+            op = "matchs"
+        elif r < 0.65:
+            op = "search"
+        elif r < 0.70:
+            op = "searchs"
+        elif r < 0.80:
+            op = "bsearch"
+        elif r < 0.88:
+            op = "iter"
+        elif r < 0.92:
+            op = "biter"
+        elif r < 0.95:
+            op = "named"
+        elif r < 0.97:
+            op = "flags"
+        else:
+            op = "empty"
+        if op == "flags":
+            vecs.append("flags\t%d\t%d\t%d\t%d" %
+                        (rng.randint(0, 1), rng.randint(0, 1),
+                         rng.randint(0, 1), rng.randint(0, 1)))
+            continue
+        pat = _rx_pattern(rng)
+        backward = op in ("bsearch", "biter")
+        cf = _rflags(rng, backward)
+        foc = None
+        if op in ("match", "matchs", "search", "searchs", "bsearch",
+                  "iter", "biter"):
+            foc = _rx_focused(rng)
+        if op == "compile":
+            vecs.append("compile\t%s\t%d" % (esc(pat), cf))
+        elif op in ("match", "matchs"):
+            if foc is not None:
+                pat, subj = foc
+            else:
+                subj = _rx_subject(rng, pat)
+            vecs.append("%s\t%s\t%d\t%s" % (op, esc(pat), cf, esc(subj)))
+        elif op == "named":
+            nm = "".join(rng.choice("abcXYZ019_")
+                         for _ in range(rng.randint(0, 6)))
+            vecs.append("named\t%s\t%d\t%s" % (esc(pat), cf, nm))
+        elif op == "empty":
+            vecs.append("empty\t%s\t%d" % (esc(pat), cf))
+        else:
+            if foc is not None:
+                pat, core = foc
+                pre = bytes(rng.choice(b"ab019 _,.")
+                            for _ in range(rng.randint(0, 4)))
+                post = bytes(rng.choice(b"ab019 _,.")
+                             for _ in range(rng.randint(0, 4)))
+                subj = pre + core + post
+                lo = len(pre)
+                hi = len(pre) + len(core)
+                b = rng.choice([0, lo, rng.randint(0, len(subj))])
+                e = rng.choice([len(subj), hi,
+                                rng.randint(0, len(subj))])
+            else:
+                subj = _rx_subject(rng, pat)
+                b = rng.randint(0, len(subj))
+                e = rng.randint(0, len(subj))
+            if rng.random() < 0.7 and b > e:
+                b, e = e, b
+            xf = rng.choice([0, 0, 0, rng.randint(0, 63)])
+            vecs.append("%s\t%s\t%d\t%d\t%d\t%d\t%s" %
+                        (op, esc(pat), cf, b, e, xf, esc(subj)))
+    return vecs
+
+
+_RX_CTYPE_CPS = [0, 1, 9, 10, 13, 32, 48, 57, 65, 90, 95, 97, 122,
+                 127, 128, 160, 168, 170, 178, 179, 185, 188, 233,
+                 937, 945, 1080, 12288, 12354, 19968, 1048, 1632,
+                 1776, 2534, 8304, 8544, 65296, 0x10FFFF, 0x110000,
+                 0x1FFFFF, 0x7FFFFFFF]
+
+
+def gen_regex_vm(rng, count):
+    vecs = []
+    for _ in range(count):
+        r = rng.random()
+        if r < 0.25:
+            pat = _rx_pattern(rng)
+            vecs.append("compile\t%s\t%d" %
+                        (esc(pat), rng.choice([0, 0, 1, 2, 3, 4, 5,
+                                                6, 7, 8, 12, 15])))
+        elif r < 0.85:
+            pat = _rx_pattern(rng)
+            backward = rng.random() < 0.3
+            mode = (2 if backward else 1) | \
+                (4 if rng.random() < 0.6 else 0) | \
+                (8 if rng.random() < 0.25 else 0) | \
+                (16 if rng.random() < 0.25 else 0)
+            cf = _rflags(rng, backward)
+            foc = _rx_focused(rng)
+            if foc is not None:
+                pat, core = foc
+                pre = bytes(rng.choice(b"ab019 _,.")
+                            for _ in range(rng.randint(0, 4)))
+                post = bytes(rng.choice(b"ab019 _,.")
+                             for _ in range(rng.randint(0, 4)))
+                subj = pre + core + post
+            else:
+                subj = _rx_subject(rng, pat)
+            # Nested windows (search inside subject, like every real
+            # caller): a search outside the subject is C++ UB (the
+            # boundary assertions read pos-1/pos) and panics the Odin
+            # port, so that class is excluded (see results.log).
+            # Windows may still split characters; the harness clamps.
+            sb = rng.randint(0, len(subj))
+            se = rng.randint(sb, len(subj))
+            b = rng.randint(sb, se)
+            e = rng.randint(b, se)
+            if rng.random() < 0.1:
+                b, e = e, b  # harness raises end to begin
+            xf = rng.choice([0, 0, rng.randint(0, 63)])
+            vecs.append("exec\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s" %
+                        (esc(pat), cf, mode, b, e, sb, se, xf, esc(subj)))
+        else:
+            mask = rng.choice([0, 1, 2, 4, 8, 16, 32, 64, 128, 255,
+                               rng.randint(0, 255), rng.randint(0, 255)])
+            k = rng.random()
+            if k < 0.55:
+                cp = rng.randint(0, 127)
+            elif k < 0.85:
+                cp = rng.choice(_RX_CTYPE_CPS)
+            else:
+                cp = rng.randint(0, 0x2FFFF)
+            vecs.append("ctype\t%d\t%d" % (mask, cp))
+    return vecs
+
+
+# ---------------------------------------------------------------- faces
+
+_FACE_NAMED = ["default", "black", "red", "green", "yellow", "blue",
+               "magenta", "cyan", "white", "bright-black",
+               "bright-red", "bright-green", "bright-yellow",
+               "bright-blue", "bright-magenta", "bright-cyan",
+               "bright-white"]
+_FACE_ATTRS = "ucUrbBdisfgaF"
+
+
+def _rface_color(rng, valid=True):
+    r = rng.random()
+    if r < 0.5:
+        return rng.choice(_FACE_NAMED)
+    if r < 0.75:
+        return "rgb:%02x%02x%02x" % (rng.randint(0, 255),
+                                     rng.randint(0, 255),
+                                     rng.randint(0, 255))
+    a = rng.randint(17, 255) if valid else rng.randint(0, 255)
+    if not valid and rng.random() < 0.3:
+        # Malformed hex.
+        return "rgba:" + "".join(rng.choice("0123456789abcdefXYZ")
+                                 for _ in range(rng.choice([6, 7, 8])))
+    return "rgba:%02x%02x%02x%02x" % (rng.randint(0, 255),
+                                      rng.randint(0, 255),
+                                      rng.randint(0, 255), a)
+
+
+def _rface_attrs(rng):
+    n = rng.randint(0, 5)
+    return "".join(rng.sample(_FACE_ATTRS, min(n, len(_FACE_ATTRS))))
+
+
+def _rface(rng):
+    return "%s|%s|%s|%s" % (_rface_color(rng), _rface_color(rng),
+                             _rface_color(rng), _rface_attrs(rng))
+
+
+def _rface_desc(rng):
+    """A face description with no ',' or '+' after '@' (those are C++
+    out-of-bounds reads; the Odin port reports Invalid_Description)."""
+    r = rng.random()
+    if r < 0.55:
+        fg = rng.choice([_rface_color(rng), "", "red", "Default"])
+        desc = fg
+        if rng.random() < 0.5:
+            desc += "," + rng.choice([_rface_color(rng), "", "blue"])
+            if rng.random() < 0.4:
+                desc += "," + rng.choice([_rface_color(rng), "green"])
+        if rng.random() < 0.35:
+            attrs = _rface_attrs(rng)
+            if rng.random() < 0.2:
+                attrs += rng.choice("xyz?!q")
+            desc += "+" + attrs
+        if rng.random() < 0.3:
+            desc += "@" + rng.choice(["Base", "Default", "Information",
+                                      "X", "", "red"])
+        return desc.encode()
+    if r < 0.8:
+        # Mutation of a structured description.
+        data = _mutate(rng, _rface_desc(rng),
+                       alphabet=b"rgb:,+@wYUHu", n_edits=2)
+    else:
+        # ASCII soup (controls included, TAB/newline escaped by esc):
+        # bytes >= 0x80 take different word-class paths in C++
+        # (is_word false) and Odin (unicode tables), pinned by seeds.
+        data = bytes(rng.randint(0, 0x7F) for _ in range(rng.randint(0, 20)))
+    at = data.find(b"@")
+    if at >= 0:
+        data = data[:at + 1] + bytes(b for b in data[at + 1:]
+                                     if b not in b",+")
+    return data
+
+
+def _face_desc_ok(desc):
+    at = desc.find(b"@")
+    if at >= 0 and any(b in b",+" for b in desc[at + 1:]):
+        return False
+    return True
+
+
+def _rface_name(rng):
+    # ASCII only (see _rface_desc): high bytes diverge in word class.
+    r = rng.random()
+    if r < 0.5:
+        return "".join(rng.choice("abcXYZ019_")
+                       for _ in range(rng.randint(1, 8))).encode()
+    if r < 0.6:
+        return rng.choice(["Default", "Information", "red",
+                           "NewFace"]).encode()
+    if r < 0.7:
+        return b""
+    return bytes(rng.randint(0, 0x7F) for _ in range(rng.randint(0, 10)))
+
+
+def gen_faces(rng, count):
+    vecs = []
+    for _ in range(count):
+        r = rng.random()
+        if r < 0.20:
+            vecs.append("merge\t%s\t%s" % (esc(_rface(rng).encode()),
+                                             esc(_rface(rng).encode())))
+        elif r < 0.30:
+            vecs.append("tostring\t" + esc(_rface(rng).encode()))
+        elif r < 0.38:
+            vecs.append("attrstr\t" + _rface_attrs(rng))
+        elif r < 0.63:
+            d = _rface_desc(rng)
+            assert _face_desc_ok(d), d
+            vecs.append("parse\t" + esc(d))
+        elif r < 0.75:
+            d = _rface_desc(rng)
+            assert _face_desc_ok(d), d
+            vecs.append("lookup\t" + esc(d))
+        elif r < 0.85:
+            d = _rface_desc(rng)
+            assert _face_desc_ok(d), d
+            vecs.append("add\t%s\t%s\t%d" % (esc(_rface_name(rng)),
+                                                esc(d), rng.randint(0, 1)))
+        elif r < 0.90:
+            ds = [_rface_desc(rng) for _ in range(3)]
+            assert all(map(_face_desc_ok, ds))
+            vecs.append("chain\t%s\t%s\t%d\t%s\t%s\t%d\t%s" %
+                        (esc(_rface_name(rng)), esc(ds[0]),
+                         rng.randint(0, 1), esc(_rface_name(rng)),
+                         esc(ds[1]), rng.randint(0, 1), esc(ds[2])))
+        elif r < 0.95:
+            ds = [_rface_desc(rng) for _ in range(2)]
+            assert all(map(_face_desc_ok, ds))
+            vecs.append("flatten\t%s\t%s\t%s\t%s" %
+                        (esc(_rface_name(rng)), esc(ds[0]),
+                         esc(_rface_name(rng)), esc(ds[1])))
+        else:
+            ds = [_rface_desc(rng) for _ in range(2)]
+            assert all(map(_face_desc_ok, ds))
+            vecs.append("child\t%s\t%s\t%s" % (esc(_rface_name(rng)),
+                                                  esc(ds[0]), esc(ds[1])))
+    return vecs
+
+
+# ---------------------------------------------------------------- keymap_manager
+
+_KEY_MODS = [0, 1, 2, 3, 4, 5, 6, 7, -1, -2, 2047, 4095,
+             0x7FFFFFFF, -0x80000000]
+_KEY_CPS = [0, 97, 98, 65, 48, 32, 233, 0xD800, 0xDFFF, 0xE000,
+            0x10FFFF, 0x110000, 0x1FFFFF, 0x7FFFFFFF]
+_KEYMODES = list(range(0, 11))
+
+
+def _rkey(rng):
+    if rng.random() < 0.6:
+        mod = rng.choice(_KEY_MODS[:8])
+    elif rng.random() < 0.7:
+        mod = rng.randint(0, 2047)
+    else:
+        mod = rng.choice(_KEY_MODS)
+    if rng.random() < 0.6:
+        cp = rng.choice(_KEY_CPS[:6])
+    elif rng.random() < 0.7:
+        cp = rng.randint(0, 0x2FFFF)
+    else:
+        cp = rng.choice(_KEY_CPS)
+    return "%d:%d" % (mod, cp)
+
+
+def _rkeys(rng, lo=0, hi=4):
+    return ",".join(_rkey(rng) for _ in range(rng.randint(lo, hi)))
+
+
+def _rkeymode_name(rng):
+    r = rng.random()
+    if r < 0.4:
+        return "".join(rng.choice("abcdefxyz")
+                       for _ in range(rng.randint(1, 8))).encode()
+    if r < 0.55:
+        return rng.choice(["normal", "insert", "prompt", "menu",
+                           "goto", "view", "user", "object",
+                           "combine"]).encode()
+    if r < 0.65:
+        return b""
+    if r < 0.85:
+        return rbytes(rng, 0, 10)
+    return rng.choice(_UTF8_SAMPLES)
+
+
+def gen_keymap_manager(rng, count):
+    vecs = []
+    for _ in range(count):
+        r = rng.random()
+        if r < 0.25:
+            vecs.append("mapget\t%s\t%d\t%s\t%s\t%d\t%s\t%d" %
+                        (_rkey(rng), rng.choice(_KEYMODES),
+                         _rkeys(rng), esc(rbytes(rng, 0, 16)),
+                         rng.randint(0, 1), _rkey(rng),
+                         rng.choice(_KEYMODES)))
+        elif r < 0.40:
+            vecs.append("unmapget\t%s\t%d\t%s\t%s\t%d\t%s\t%d" %
+                        (_rkey(rng), rng.choice(_KEYMODES),
+                         _rkeys(rng), esc(rbytes(rng, 0, 16)),
+                         rng.randint(0, 1), _rkey(rng),
+                         rng.choice(_KEYMODES)))
+        elif r < 0.52:
+            vecs.append("unmapall\t%d\t%s\t%d\t%s\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d" %
+                        (rng.choice(_KEYMODES), _rkey(rng),
+                         rng.choice(_KEYMODES), _rkeys(rng),
+                         esc(rbytes(rng, 0, 12)), rng.randint(0, 1),
+                         _rkey(rng), rng.choice(_KEYMODES),
+                         _rkeys(rng), esc(rbytes(rng, 0, 12)),
+                         rng.randint(0, 1), rng.choice(_KEYMODES)))
+        elif r < 0.72:
+            n = rng.randint(0, 4)
+            parts = ["mapped", str(rng.choice(_KEYMODES)), str(n)]
+            for _ in range(n):
+                parts += [_rkey(rng), str(rng.choice(_KEYMODES)),
+                          _rkeys(rng), esc(rbytes(rng, 0, 12)),
+                          str(rng.randint(0, 1))]
+            vecs.append("\t".join(parts))
+        elif r < 0.87:
+            n = rng.randint(0, 4)
+            names = [esc(_rkeymode_name(rng)) for _ in range(n)]
+            # Sometimes repeat a name to hit Already_Defined.
+            if n >= 2 and rng.random() < 0.3:
+                names[-1] = names[0]
+            vecs.append("\t".join(["usermode", str(n)] + names))
+        else:
+            ck = "-" if rng.random() < 0.4 else _rkeys(rng)
+            vecs.append("parent\t%s\t%d\t%s\t%s\t%s\t%s\t%d" %
+                        (_rkey(rng), rng.choice(_KEYMODES),
+                         _rkeys(rng), esc(rbytes(rng, 0, 12)), ck,
+                         esc(rbytes(rng, 0, 12)), rng.randint(0, 1)))
+    return vecs
+
+
+# ---------------------------------------------------------------- parameters_parser
+
+_PP_SWITCH_NAMES = [b"a", b"foo", b"bar", b"long-name", b"x", b"",
+                    b"switch", b"Foo", b"0"]
+
+
+def _rpp_switches(rng, ascii_only=False):
+    n = rng.randint(0, 3)
+    out = []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.6:
+            nm = rng.choice(_PP_SWITCH_NAMES)
+        elif ascii_only or r < 0.75:
+            nm = rword(rng).encode()
+        elif r < 0.9:
+            nm = rbytes(rng, 0, 8)
+        else:
+            nm = rng.choice(_UTF8_SAMPLES)
+        takes = rng.randint(0, 1)
+        if ascii_only:
+            desc = rword(rng).encode()
+            if rng.random() < 0.5:
+                desc += b" " + rword(rng).encode()
+        else:
+            desc = rbytes(rng, 0, 16)
+        out += [esc(nm), str(takes), esc(desc)]
+    return [str(n)] + out
+
+
+def _rpp_params(rng, known):
+    n = rng.randint(0, 6)
+    out = []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.30 and known:
+            out.append(b"-" + rng.choice(known))
+        elif r < 0.45:
+            out.append(b"-" + rbytes(rng, 0, 6))
+        elif r < 0.55:
+            out.append(b"--")
+        elif r < 0.62:
+            out.append(b"-")
+        elif r < 0.80:
+            out.append(rbytes(rng, 0, 12))
+        else:
+            out.append(rng.choice([b"pos", b"value", b"x", b""]))
+    return [str(n)] + [esc(p) for p in out]
+
+
+def gen_parameters_parser(rng, count):
+    vecs = []
+    for _ in range(count):
+        r = rng.random()
+        if r < 0.90:
+            op = "parse" if rng.random() < 0.78 else "parseie"
+            flags = rng.randint(0, 7)
+            lo = rng.randint(0, 2)
+            hi = rng.choice([-1, -1, 0, 1, 2, 3, 5])
+            sw = _rpp_switches(rng)
+            # Recover the known names for param generation.
+            known = []
+            for i in range(int(sw[0])):
+                # Names were escaped; params need raw bytes + dash.
+                # Re-derive: the escape is injective on our inputs, so
+                # unescape here.
+                e = sw[1 + 3 * i]
+                raw = bytearray()
+                j = 0
+                while j < len(e):
+                    if e[j:j + 2] == "\\x" and j + 3 < len(e) + 1:
+                        raw.append(int(e[j + 2:j + 4], 16))
+                        j += 4
+                    else:
+                        raw.append(ord(e[j]))
+                        j += 1
+                known.append(bytes(raw))
+            params = _rpp_params(rng, known)
+            vecs.append("\t".join([op, str(flags), str(lo), str(hi)] +
+                                  sw + params))
+        else:
+            # gendoc over ASCII only: alignment uses display widths
+            # (wcwidth vs unicode tables differ on non-ASCII).
+            vecs.append("\t".join(["gendoc"] + _rpp_switches(
+                rng, ascii_only=True)))
+    return vecs
+
+
 # ---------------------------------------------------------------- normalize
 
 def _norm_json_cc(line):
@@ -723,6 +1569,50 @@ def _norm_format_cc(line):
     return line
 
 
+def _norm_faces_cc(line):
+    """Map a C++ faces-harness ERR line onto the Odin error name."""
+    if line.startswith("ERR "):
+        msg = line[4:]
+        if msg.startswith("invalid face description"):
+            return "ERR Invalid_Description"
+        if msg.startswith("no such face attribute:"):
+            return "ERR Unknown_Attribute"
+        if msg.startswith("unable to parse color:") or \
+           msg.startswith("invalid digit") or \
+           msg == "Colors alpha must be > 16":
+            return "ERR Invalid_Color"
+        if msg.startswith("face '") and msg.endswith("' already defined"):
+            return "ERR Already_Defined"
+        if msg.startswith("invalid face name:"):
+            return "ERR Invalid_Name"
+        if msg == "face cycle detected":
+            return "ERR Face_Cycle"
+        return line  # unknown: surface as mismatch for manual review
+    return line
+
+
+def _norm_keymap_cc(line):
+    """Map C++ keymap-harness ERR tokens (TAB-separated in usermode
+    output) onto the Odin error names."""
+    if "ERR " not in line:
+        return line
+
+    def norm_tok(tok):
+        if tok.startswith("ERR "):
+            msg = tok[4:]
+            if msg.startswith("'") and \
+               msg.endswith("' is already a regular mode"):
+                return "ERR Regular_Mode"
+            if msg.startswith("user mode '") and \
+               msg.endswith("' already defined"):
+                return "ERR Already_Defined"
+            if msg.startswith("invalid mode name: '"):
+                return "ERR Invalid_Name"
+        return tok
+
+    return "\t".join(norm_tok(t) for t in line.split("\t"))
+
+
 NORMALIZE = {
     "hash": (lambda s: s),
     "diff": (lambda s: s),
@@ -731,6 +1621,11 @@ NORMALIZE = {
     "format": _norm_format_cc,
     "ranges": (lambda s: s),
     "utf8": (lambda s: s),
+    "regex": (lambda s: s),
+    "regex_vm": (lambda s: s),
+    "faces": _norm_faces_cc,
+    "keymap_manager": _norm_keymap_cc,
+    "parameters_parser": (lambda s: s),
 }
 
 
@@ -783,6 +1678,11 @@ COMPARE = {
     "format": _eq_format,
     "ranges": _eq_default,
     "utf8": _eq_default,
+    "regex": _eq_default,
+    "regex_vm": _eq_default,
+    "faces": _eq_default,
+    "keymap_manager": _eq_default,
+    "parameters_parser": _eq_default,
 }
 
 
@@ -867,7 +1767,9 @@ def check_module(module, lines, max_mismatch):
 
 def load_seeds(module):
     path = os.path.join(ROOT, module, "vectors.txt")
-    with open(path, "r", encoding="ascii") as f:
+    # UTF-8: regex seeds embed raw non-ASCII characters (the harnesses
+    # pass raw >=0x80 bytes through; ASCII seeds are unaffected).
+    with open(path, "r", encoding="utf-8") as f:
         return [ln.rstrip("\n") for ln in f if ln.strip() != ""]
 
 

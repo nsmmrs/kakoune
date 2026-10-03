@@ -1,0 +1,100 @@
+merge	default|default|default|	default|default|default|
+merge	red|blue|green|	white|black|yellow|
+merge	red|blue|green|	default|default|default|
+merge	default|default|default|	red|blue|green|
+merge	rgb:ff0000|default|default|	rgba:0000ff80|default|default|
+merge	rgb:ff0000|default|default|	rgba:0000ff11|default|default|
+merge	rgb:ff0000|default|default|	rgba:0000ffff|default|default|
+merge	red|default|default|	rgba:0000ff80|default|default|
+merge	red|blue|green|F	white|black|yellow|
+merge	red|blue|green|	white|black|yellow|F
+merge	red|blue|green|f	white|black|yellow|
+merge	red|blue|green|	white|black|yellow|f
+merge	red|blue|green|g	white|black|yellow|
+merge	red|blue|green|a	white|black|yellow|ub
+merge	red|blue|green|ub	white|black|yellow|a
+merge	red|blue|rgb:00ff00|	white|black|rgba:ff000080|
+merge	default|default|default|ucUrbBdis	default|default|default|fga
+tostring	default|default|default|
+tostring	red|blue|green|
+tostring	red|blue|green|ub
+tostring	rgb:ff0000|rgba:00ff0080|default|F
+tostring	bright-white|black|cyan|s
+attrstr	
+attrstr	ub
+attrstr	F
+attrstr	fga
+attrstr	fg
+attrstr	Ff
+attrstr	ucUrbBdisfga
+attrstr	sBdr
+parse	red
+parse	red,blue
+parse	red,blue,green
+parse	red+bu
+parse	@Base
+parse	Base
+parse	red@Base
+parse	+b
+parse	
+parse	red,
+parse	red+
+parse	red+x
+parse	nope
+parse	red,blue,green,yellow
+parse	rgb:ff0000
+parse	rgba:ff000080
+parse	rgb:xyz
+parse	rgba:ff000000
+parse	RGB:FF0000
+parse	red,blue+u@Base
+parse	Default
+parse	default
+parse	bright-red,bright-blue+bi
+parse	,red
+parse	,,
+lookup	Default
+lookup	PrimarySelection
+lookup	red
+lookup	red@PrimarySelection
+lookup	Nope
+lookup	Information
+lookup	InlineInformation
+lookup	
+lookup	WhitespaceIndent
+lookup	blue,red+u@Error
+add	X	red	0
+add	Default	red	0
+add	Default	red	1
+add		red	0
+add	red	red	0
+add	a b	red	0
+add	Information	red@InlineInformation	1
+add	X	nope+	0
+add	Default	red@Default	1
+add	New_Face_1	blue,white+bi	0
+add	bad-name!	red	0
+chain	A	red	0	B	blue@A	0	B
+chain	A	x@B	0	B	y@A	0	A
+chain	A	red	0	A	blue	0	A
+chain	A	red	0	A	blue	1	A
+flatten	X	red	Y	blue@X
+flatten	Default	red	X	blue
+flatten	Bad Name	red	Also Bad	blue
+child	X	red	X
+child	X	red	PrimarySelection
+child	PrimarySelection	red	PrimarySelection
+child	Default	red	Default
+echo	a\x00\x09\x0a\xffABC\x7f\x80
+parse	n2z4K0\xc3
+parse	_\xfc
+parse	\xce
+lookup	\xce
+lookup	w\xc3
+add	\xbc	X	0
+add	Gp\xce	red	0
+add	\xc3\xbc	red	0
+parse	\x80
+parse	\x80\x81
+add	\x80	red	0
+lookup	\x01\x02

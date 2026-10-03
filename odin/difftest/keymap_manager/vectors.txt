@@ -1,0 +1,36 @@
+mapget	0:97	1	0:98,0:99	hello	0	0:97	1
+mapget	0:97	1	0:98,0:99	hello	0	0:97	2
+mapget	0:97	1	0:98,0:99	hello	0	0:98	1
+mapget	1:97	1		empty mapping	1	1:97	1
+mapget	0:97	1			0	0:97	1
+mapget	0:55296	5	3:65	named key range	0	0:55296	5
+mapget	-1:97	1	0:98	negative mods	0	-1:97	1
+mapget	2147483647:1114111	10	0:0	edges	1	2147483647:1114111	10
+unmapget	0:97	1	0:98	doc	0	0:97	1
+unmapget	0:97	1	0:98	doc	0	0:97	2
+unmapall	1	0:97	1	0:98	d1	0	0:99	2	0:100	d2	1	1
+unmapall	1	0:97	1	0:98	d1	0	0:99	1	0:100	d2	1	1
+unmapall	3	0:97	1	0:98	d1	0	0:99	1	0:100	d2	1	1
+mapped	1	0
+mapped	1	2	0:98	1	0:99	d1	0	0:97	1	0:100	d2	1
+mapped	2	2	0:98	1	0:99	d1	0	0:97	1	0:100	d2	1
+mapped	1	2	0:97	1	0:90	d1	0	0:97	1	0:91	d2	1
+mapped	0	1	5:233	0		doc\x00tail	0
+usermode	0
+usermode	1	mymode
+usermode	2	foo	bar
+usermode	2	foo	foo
+usermode	1	normal
+usermode	1	combine
+usermode	1	bad mode
+usermode	1	with-dash_and1
+usermode	1	
+usermode	3	ok1	bad!no	ok2
+usermode	2	Upper	upper
+parent	0:97	1	0:98	rootdoc	-		0
+parent	0:97	1	0:98	rootdoc	0:99	childdoc	0
+parent	0:97	1	0:98	rootdoc	0:99	childdoc	1
+parent	0:97	1	0:98	rootdoc	-		1
+echo	a\x00\x09\x0a\xffABC\x7f\x80
+usermode	1	\xc3\xa9
+usermode	2	\xff	ok
