@@ -59,7 +59,19 @@ test_knot_option_value_union :: proc(t: ^testing.T) {
 	defer delete(m)
 	m["k"] = "v"
 	append(&values, m)
-	testing.expect_value(t, len(values), 12)
+	append(&values, Eol_Format.Lf)
+	append(&values, Final_Eol.Present)
+	append(&values, Byte_Order_Mark.None)
+	append(&values, Auto_Info{.Command})
+	append(&values, Auto_Complete{.Insert})
+	dcds := make([dynamic]Insert_Completer_Desc, context.allocator)
+	defer delete(dcds)
+	append(&dcds, Insert_Completer_Desc{mode = .Word})
+	append(&values, dcds)
+	append(&values, Autoreload.Ask)
+	append(&values, File_Write_Method.Overwrite)
+	append(&values, Option_types_Debug_Flags{.Keys})
+	testing.expect_value(t, len(values), 21)
 	n_int := 0
 	for v in values {
 		if _, ok := v.(int); ok {

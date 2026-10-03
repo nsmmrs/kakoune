@@ -89,7 +89,9 @@ Option_Desc :: struct {
 }
 
 // Option_Value is the closed set of option value types: every
-// declare_option<T> instantiation in src/*.cc. Replaces TypedOption<T>.
+// declare_option instantiation in src/main.cc (25 builtins, including
+// deduced types) plus the 10 :declare-option value types in
+// src/commands.cc. Replaces TypedOption<T>.
 Option_Value :: union {
 	int,
 	bool,
@@ -103,6 +105,15 @@ Option_Value :: union {
 	Option_Timestamped_List(Line_And_Spec),
 	Option_Timestamped_List(Range_And_String),
 	map[string]string,
+	Eol_Format,
+	Final_Eol,
+	Byte_Order_Mark,
+	Auto_Info,
+	Auto_Complete,
+	[dynamic]Insert_Completer_Desc,
+	Autoreload,
+	File_Write_Method,
+	Option_types_Debug_Flags,
 }
 
 // Option_Validator validates a candidate value, returning "" when valid or

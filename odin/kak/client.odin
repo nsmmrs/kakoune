@@ -1380,10 +1380,6 @@ global_scope_instance :: proc() -> ^Global_Scope {
 	panic("STUB: global_scope_instance")
 }
 
-hook_manager_run_hook :: proc(m: ^Hook_Manager, hook: Hook, param: string, ctx: ^Context) {
-	panic("STUB: hook_manager_run_hook")
-}
-
 client_manager_instance :: proc() -> ^Client_Manager {
 	panic("STUB: client_manager_instance")
 }
