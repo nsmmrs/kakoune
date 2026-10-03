@@ -504,17 +504,14 @@ input_handler_fs_check_timeout :: proc(ctx: ^Context) -> time.Duration {
 	return time.Duration(opt.value.(int)) * time.Millisecond
 }
 
-// REPORT(KNOTFIX): knot.odin's Option_Value union has no Auto_Info or
-// Auto_Complete variants even though autoinfo/autocomplete are
-// declare_option instantiations, and the fixed Option struct cannot be
-// extended locally. The helpers below read them as the int bitmask the
-// option module must store (C++ bit values match the Odin flag order).
+// input_handler_option_auto_info reads the autoinfo option value
+// (stored as its own union variant, like the C++ AutoInfo).
 input_handler_option_auto_info :: proc(opt: ^Option) -> Auto_Info {
-	return transmute(Auto_Info)u8(opt.value.(int))
+	return opt.value.(Auto_Info)
 }
 
 input_handler_option_auto_complete :: proc(opt: ^Option) -> Auto_Complete {
-	return transmute(Auto_Complete)u8(opt.value.(int))
+	return opt.value.(Auto_Complete)
 }
 
 // input_handler_guard_counts holds the reentrancy guard count per
@@ -849,10 +846,14 @@ input_handler_normal_register_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Co
 		cp_str := format_to_string_codepoint(cp, context.temp_allocator)
 		msg, _ := format_format("invalid register '{}'", []string{cp_str}, context.temp_allocator)
 		faces := context_faces(ctx)
-		atom := Display_Atom{face = input_handler_face(faces, "Error"), type = .Text, text = msg}
-		atoms := make([dynamic]Display_Atom, 1, context.temp_allocator)
-		atoms[0] = atom
-		context_print_status_simple(ctx, Display_Line{atoms = atoms})
+		// Owned line for the client's destroy; temp when clientless
+		// (the print is a no-op and nothing is retained).
+		alloc := context.temp_allocator
+		if context_has_client(ctx) {
+			alloc = context_client(ctx).allocator
+		}
+		content := client_display_line_from_text(msg, input_handler_face(faces, "Error"), alloc)
+		context_print_status_simple(ctx, content)
 	}
 }
 
@@ -890,10 +891,14 @@ input_handler_normal_on_key :: proc(data: rawptr, key_: Keys_Key) {
 		new_val := i64(n.params.count) * 10 + i64(cp - '0')
 		if new_val > i64(max(i32)) {
 			faces := context_faces(ctx)
-			atom := Display_Atom{face = input_handler_face(faces, "Error"), type = .Text, text = "parameter overflowed"}
-			atoms := make([dynamic]Display_Atom, 1, context.temp_allocator)
-			atoms[0] = atom
-			context_print_status_simple(ctx, Display_Line{atoms = atoms})
+			alloc := context.temp_allocator
+			if context_has_client(ctx) {
+				alloc = context_client(ctx).allocator
+			}
+			content := client_display_line_from_text(
+				"parameter overflowed", input_handler_face(faces, "Error"), alloc,
+			)
+			context_print_status_simple(ctx, content)
 		} else {
 			n.params.count = int(new_val)
 		}
@@ -1201,8 +1206,11 @@ input_handler_prompt_display :: proc(p: ^input_handler_Prompt) {
 	if .Password not_in p.flags {
 		content = input_handler_line_editor_build_display_line(&p.line_editor, width, p.allocator)
 	}
+	// Ownership transfers to the client (atoms and texts); the
+	// borrowed prompt text is cloned, the content texts arrive owned
+	// from build_display_line. Nothing is freed here.
 	prompt_atoms := make([dynamic]Display_Atom, 1, p.allocator)
-	prompt_atoms[0] = Display_Atom{face = p.prompt_face, type = .Text, text = p.prompt}
+	prompt_atoms[0] = Display_Atom{face = p.prompt_face, type = .Text, text = strings.clone(p.prompt, p.allocator)}
 	prompt_line := Display_Line{atoms = prompt_atoms}
 	status_style := User_Interface_Status_Style.Prompt
 	if .Search in p.flags {
@@ -1211,11 +1219,6 @@ input_handler_prompt_display :: proc(p: ^input_handler_Prompt) {
 		status_style = .Command
 	}
 	context_print_status(ctx, prompt_line, content, input_handler_line_editor_cursor_display_column(&p.line_editor), status_style)
-	delete(prompt_atoms)
-	for a in content.atoms {
-		delete(a.text, p.allocator)
-	}
-	delete(content.atoms)
 }
 
 input_handler_prompt_show_completions :: proc(p: ^input_handler_Prompt) {
@@ -1317,11 +1320,13 @@ input_handler_prompt_register_call :: proc(data: rawptr, key_: Keys_Key, ctx: ^C
 			err_face, face_err := face_registry_lookup(faces, "Error", c.allocator)
 			assert(face_err == .None)
 			msg_parts := [3]string{"no such register: '", reg_str, "'"}
-			err_line := display_buffer_line_make_text(
-				strings.concatenate(msg_parts[:], c.allocator),
+			concatenated := strings.concatenate(msg_parts[:], c.allocator)
+			err_line := client_display_line_from_text(
+				concatenated,
 				err_face,
 				c.allocator,
 			)
+			delete(concatenated, c.allocator)
 			context_print_status_simple(ctx, err_line)
 			return
 		}
@@ -2214,10 +2219,14 @@ input_handler_insert_on_key :: proc(data: rawptr, key: Keys_Key) {
 		id_str := format_to_string_int(int(buffer_current_history_id(buffer)), context.temp_allocator)
 		msg, _ := format_format("committed change #{}", []string{id_str}, context.temp_allocator)
 		faces := context_faces(ctx)
-		atom := Display_Atom{face = input_handler_face(faces, "Information"), type = .Text, text = msg}
-		atoms := make([dynamic]Display_Atom, 1, context.temp_allocator)
-		atoms[0] = atom
-		context_print_status_simple(ctx, Display_Line{atoms = atoms})
+		// Owned line for the client's destroy; temp when clientless
+		// (the print is a no-op and nothing is retained).
+		alloc := context.temp_allocator
+		if context_has_client(ctx) {
+			alloc = context_client(ctx).allocator
+		}
+		content := client_display_line_from_text(msg, input_handler_face(faces, "Information"), alloc)
+		context_print_status_simple(ctx, content)
 	} else if input_handler_key_is(key, keys_MOD_CONTROL, 'v') {
 		insert_completer_try_accept(&ins.completer)
 		key_data := new(input_handler_Insert_Key_Data, h.allocator)

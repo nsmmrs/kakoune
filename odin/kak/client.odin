@@ -150,32 +150,40 @@ client_face :: proc(reg: ^Face_Registry, name: string) -> Face {
 
 // client_display_line_from_text builds a single-atom text line (port
 // of the DisplayLine(StringView, Face) constructor). text is borrowed.
+// Client display lines own their atoms array AND atom texts
+// (mirroring C++ DisplayLine's owned Strings): producers transfer
+// fully-owned lines to the client, and destroy frees both.
 client_display_line_from_text :: proc(text: string, face: Face, allocator := context.allocator) -> Display_Line {
 	line: Display_Line
 	line.atoms = make([dynamic]Display_Atom, 1, allocator)
-	line.atoms[0] = Display_Atom{face = face, type = .Text, text = text}
+	line.atoms[0] = Display_Atom{face = face, type = .Text, text = strings.clone(text, allocator)}
 	return line
 }
 
-// client_display_line_clone deep-copies a line's atoms array (atom
-// text stays borrowed). The caller owns the result.
+// client_display_line_clone deep-copies a line (atoms array and atom
+// texts). The caller owns the result.
 client_display_line_clone :: proc(line: Display_Line, allocator := context.allocator) -> Display_Line {
 	res: Display_Line
 	res.range = line.range
 	res.atoms = make([dynamic]Display_Atom, len(line.atoms), allocator)
-	copy(res.atoms[:], line.atoms[:])
+	for atom, i in line.atoms {
+		res.atoms[i] = atom
+		res.atoms[i].text = strings.clone(atom.text, allocator)
+	}
 	return res
 }
 
-// client_display_line_destroy frees a line's atoms array. Atom text is
-// borrowed and untouched.
+// client_display_line_destroy frees a line's atom texts and atoms
+// array. Lines handed to the client are owned, never borrowed.
 client_display_line_destroy :: proc(line: ^Display_Line, allocator := context.allocator) {
+	for a in line.atoms {
+		delete(a.text, allocator)
+	}
 	delete(line.atoms)
 	line.atoms = nil
 }
 
-// client_display_line_list_destroy frees every line's atoms array and
-// the list itself. Atom text is borrowed and untouched.
+// client_display_line_list_destroy frees every line and the list.
 client_display_line_list_destroy :: proc(list: ^Display_Line_List, allocator := context.allocator) {
 	for &line in list {
 		client_display_line_destroy(&line, allocator)
@@ -403,7 +411,11 @@ client_info_show :: proc(
 	style: User_Interface_Info_Style,
 ) {
 	if c.info.style == .Modal {
-		// We already have a modal info opened, do not touch it.
+		// We already have a modal info opened, do not touch it;
+		// destroy the refused lines (the C++ caller temps die here).
+		refused_title, refused_content := title, content
+		client_display_line_destroy(&refused_title, c.allocator)
+		client_display_line_list_destroy(&refused_content, c.allocator)
 		return
 	}
 	client_display_line_destroy(&c.info.title, c.allocator)
@@ -445,13 +457,18 @@ client_info_show_string :: proc(
 	defer delete(parts)
 	list := make(Display_Line_List, len(parts), c.allocator)
 	for part, i in parts {
-		// Borrow tab-free lines; only tab expansion allocates, and
-		// those copies are owned by the box (see the module note).
+		// from_text clones for box ownership; the tab-expanded
+		// intermediate is freed here.
 		text := part
+		expanded := false
 		if strings.contains_rune(part, '\t') {
 			text = string_utils_replace(part, "\t", " ", c.allocator)
+			expanded = true
 		}
 		list[i] = client_display_line_from_text(text, Face{}, c.allocator)
+		if expanded {
+			delete(text, c.allocator)
+		}
 	}
 	client_info_show(c, title_line, list, anchor, style)
 }
@@ -793,13 +810,12 @@ client_generate_mode_line :: proc(c: ^Client, allocator := context.allocator) ->
 	atoms["context_info"] = context_info
 	shell_env := make(Env_Var_Map, 2, allocator)
 	defer env_vars_free(&shell_env, allocator)
-	_, has_params := info.normal_params.?
 	if params, ok := info.normal_params.?; ok {
-		shell_env["register"] = format_to_string(params.reg, allocator)
-		shell_env["count"] = format_to_string(params.count, allocator)
+		shell_env[strings.clone("register", allocator)] = format_to_string(params.reg, allocator)
+		shell_env[strings.clone("count", allocator)] = format_to_string(params.count, allocator)
 	} else {
-		shell_env["register"] = ""
-		shell_env["count"] = ""
+		shell_env[strings.clone("register", allocator)] = strings.clone("", allocator)
+		shell_env[strings.clone("count", allocator)] = strings.clone("", allocator)
 	}
 	shell_ctx := Shell_Context{env_vars = shell_env}
 	expanded := command_expand(modelinefmt, ctx, &shell_ctx, Client_Postprocess{client_expand_escape_proc, nil}, allocator)
@@ -812,7 +828,7 @@ client_generate_mode_line :: proc(c: ^Client, allocator := context.allocator) ->
 		// debug buffer, and keeps the previous modeline. The port cannot
 		// alias the previous line safely here, so it logs and yields an
 		// empty line instead (only reachable with a malformed modelinefmt).
-		display_buffer_line_destroy(&result)
+		client_display_line_destroy(&result, allocator)
 		result = display_buffer_line_make(allocator)
 		err_name := "unknown parse error"
 		switch parse_err {
@@ -831,10 +847,6 @@ client_generate_mode_line :: proc(c: ^Client, allocator := context.allocator) ->
 	}
 	client_display_line_destroy(&info.display_line, allocator)
 	client_display_line_destroy(&context_info, allocator)
-	if has_params {
-		delete(shell_env["register"], allocator)
-		delete(shell_env["count"], allocator)
-	}
 	return result
 }
 

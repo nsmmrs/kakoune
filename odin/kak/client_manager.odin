@@ -179,7 +179,7 @@ client_manager_create_client :: proc(
 		faces := context_faces(ctx)
 		info_face, info_err := face_registry_lookup(faces, "Information", m.allocator)
 		assert(info_err == .None)
-		line := display_buffer_line_make_text(
+		line := client_display_line_from_text(
 			"This *scratch* buffer won't be automatically saved",
 			info_face,
 			m.allocator,
@@ -209,11 +209,12 @@ client_manager_create_client :: proc(
 		err_faces := context_faces(ctx)
 		err_face, err_face_err := face_registry_lookup(err_faces, "Error", m.allocator)
 		assert(err_face_err == .None)
-		// NOTE: exec_msg is borrowed by the stored status line (client
-		// convention: status text is never freed), so it is not deleted.
-		err_line := display_buffer_line_make_text(exec_msg, err_face, m.allocator)
+		// from_text clones for client ownership; the message dies
+		// after the hook below is done with it.
+		err_line := client_display_line_from_text(exec_msg, err_face, m.allocator)
 		context_print_status_simple(ctx, err_line)
 		hook_manager_run_hook(hooks, .Runtime_Error, exec_msg, ctx)
+		delete(exec_msg, m.allocator)
 	}
 
 	for existing in m.clients {

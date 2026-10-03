@@ -411,12 +411,17 @@ hook_manager_run_hook :: proc(m: ^Hook_Manager, hook: Hook, param: string, ctx: 
 		strings.write_string(&b, param)
 		strings.write_string(&b, "', see *debug* buffer")
 		text := strings.to_string(b)
-		defer delete(text, context.allocator)
 		atoms := make([dynamic]Display_Atom, 0, 1, context.allocator)
-		defer delete(atoms)
 		append(&atoms, Display_Atom{face = face, type = .Text, text = text})
 		line := Display_Line{atoms = atoms}
+		// Ownership transfers to the client on print; without a
+		// client the print is a no-op and the line dies here.
+		// (The builder buffer backs text: no builder_destroy.)
 		context_print_status(ctx, Display_Line{}, line, Units_ColumnCount(-1), User_Interface_Status_Style.Status)
+		if !context_has_client(ctx) {
+			delete(text, context.allocator)
+			delete(atoms)
+		}
 	}
 }
 

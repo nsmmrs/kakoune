@@ -270,10 +270,9 @@ client_test_info_show_modal_guard :: proc(t: ^testing.T) {
 	client_info_show(&c, title, make(Display_Line_List, 0), Coord_Buffer{}, .Modal)
 	c.ui_pending = Client_Pending_Ui{}
 
+	// Refused lines are destroyed by the callee (modal guard).
 	other_title := client_display_line_from_text("other", Face{})
-	defer client_display_line_destroy(&other_title)
 	other_content := make(Display_Line_List, 0)
-	defer delete(other_content)
 	client_info_show(&c, other_title, other_content, Coord_Buffer{}, .Prompt)
 
 	testing.expect_value(t, c.info.title.atoms[0].text, "modal")
@@ -345,10 +344,7 @@ client_test_info_show_string_tabs :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(c.info.title.atoms), 0)
 	testing.expect_value(t, len(c.info.content), 1)
 	testing.expect_value(t, c.info.content[0].atoms[0].text, "a b")
-	// The tab-expanded copy is owned by the box: free it before the
-	// arrays (atom text is otherwise borrowed).
-	delete(c.info.content[0].atoms[0].text)
-	c.info.content[0].atoms[0].text = ""
+	// Box owns atoms and texts; teardown destroys both.
 }
 
 // The string overload honors the modal guard without allocating.

@@ -56,7 +56,7 @@ test_commands_declare_builtins :: proc(g: ^Global_Scope) {
 		_, _ = option_manager_registry_declare(reg, "readonly", "", false)
 	}
 	// Client/input-handler paths get_checked these (C++ main.cc
-	// builtins); the int bitmasks stay 0 (no autoinfo/autocomplete).
+	// builtins); the flag sets stay empty (no autoinfo/autocomplete).
 	if !option_manager_registry_exists(reg, "idle_timeout") {
 		_, _ = option_manager_registry_declare(reg, "idle_timeout", "", 50)
 	}
@@ -67,10 +67,10 @@ test_commands_declare_builtins :: proc(g: ^Global_Scope) {
 		_, _ = option_manager_registry_declare(reg, "scrolloff", "", Coord_Display{})
 	}
 	if !option_manager_registry_exists(reg, "autoinfo") {
-		_, _ = option_manager_registry_declare(reg, "autoinfo", "", 0)
+		_, _ = option_manager_registry_declare(reg, "autoinfo", "", Auto_Info{})
 	}
 	if !option_manager_registry_exists(reg, "autocomplete") {
-		_, _ = option_manager_registry_declare(reg, "autocomplete", "", 0)
+		_, _ = option_manager_registry_declare(reg, "autocomplete", "", Auto_Complete{})
 	}
 	// .No keeps client_check_if_buffer_needs_reloading off the
 	// filesystem in tests.
@@ -1878,10 +1878,6 @@ test_commands_echo_status :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Commands_Error.None)
 	testing.expect(t, len(client.status_content.atoms) == 1)
 	testing.expect_value(t, client.status_content.atoms[0].text, "status-msg")
-	// The status line borrows the echo message (client convention:
-	// never freed); release it here so the tracked run stays clean.
-	delete(client.status_content.atoms[0].text, f.allocator)
-	client.status_content.atoms[0].text = ""
 }
 
 @(test)
@@ -2173,13 +2169,6 @@ test_commands_prompt_push :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, err, Commands_Error.None)
 	testing.expect(t, len(client.input_handler.mode_stack) == before + 1)
-	// input_handler_prompt_display deletes the status atoms after
-	// transferring their ownership to the client (use-after-free in
-	// input_handler.odin); drop the dangling lines so teardown does
-	// not double-free. Remove when input_handler is fixed (if fixed
-	// by cloning instead, this nil-ing must go with it).
-	client.status_prompt = Display_Line{}
-	client.status_content = Display_Line{}
 }
 
 @(test)

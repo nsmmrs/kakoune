@@ -191,7 +191,7 @@ commands_report :: proc(err: Commands_Error, msg: string, ctx: ^Context) {
 	if f, ferr := face_registry_lookup(context_faces(ctx), "Error", ctx.allocator); ferr == .None {
 		face = f
 	}
-	line := display_buffer_line_make_text(msg, face, ctx.allocator)
+	line := client_display_line_from_text(msg, face, ctx.allocator)
 	context_print_status_simple(ctx, line)
 }
 
@@ -3895,11 +3895,15 @@ commands_edit :: proc(
 				buffer = created
 			}
 			if .New in buffer.flags {
-				line := display_buffer_line_make_text(
-					strings.concatenate({"new file '", name, "'"}, allocator),
+				// from_text clones for client ownership; the
+				// intermediate dies here.
+				concatenated := strings.concatenate({"new file '", name, "'"}, allocator)
+				line := client_display_line_from_text(
+					concatenated,
 					commands_status_face(ctx, "StatusLine"),
 					allocator,
 				)
+				delete(concatenated, allocator)
 				context_print_status_simple(ctx, line)
 			}
 		}
@@ -4916,21 +4920,23 @@ commands_echo :: proc(
 		commands_write_to_debug_buffer(message, env.buffers, allocator)
 		return .None, ""
 	}
-	// The status line borrows the message (never freed).
+	// from_text/parse clone for client ownership; the message dies here.
 	if _, markup := parameters_parser_get_switch(p, "markup"); markup {
 		line, lerr := display_buffer_parse_line(message, context_faces(ctx), nil, allocator)
 		if lerr != .None {
 			delete(message, allocator)
 			return commands_errorf("invalid markup", {}, allocator)
 		}
+		delete(message, allocator)
 		context_print_status_simple(ctx, line)
 		return .None, ""
 	}
-	line := display_buffer_line_make_text(
+	line := client_display_line_from_text(
 		message,
 		commands_status_face(ctx, "StatusLine"),
 		allocator,
 	)
+	delete(message, allocator)
 	context_print_status_simple(ctx, line)
 	return .None, ""
 }

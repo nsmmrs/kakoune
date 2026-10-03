@@ -621,18 +621,24 @@ display_buffer_parse_line_with_face :: proc(
 					}
 				}
 				if closing < 0 {
-					display_buffer_line_destroy(&res)
+					// Owned result: free texts too (atoms-only
+					// destroy is for borrowed buffer views).
+					client_display_line_destroy(&res, allocator)
 					return res, .Unclosed_Face
 				}
 				if i + 1 < len(line) && line[i + 1] == '{' && closing + 1 < len(line) &&
 				   line[closing + 1] == '}' {
 					builtin, ok := builtins[line[i + 2:closing]]
 					if !ok {
-						display_buffer_line_destroy(&res)
+						client_display_line_destroy(&res, allocator)
 						return res, .Undefined_Atom
 					}
 					for atom in builtin.atoms {
-						display_buffer_line_push_back(&res, atom)
+						// Clone: the builtin keeps its texts (like C++
+						// shared Strings); the result owns its copies.
+						owned := atom
+						owned.text = strings.clone(atom.text, allocator)
+						display_buffer_line_push_back(&res, owned)
 					}
 					closing += 1
 				} else if closing == i + 2 && line[i + 1] == '\\' {
@@ -641,7 +647,7 @@ display_buffer_parse_line_with_face :: proc(
 				} else {
 					parsed, err := face_registry_lookup(faces, line[i + 1:closing], allocator)
 					if err != .None {
-						display_buffer_line_destroy(&res)
+						client_display_line_destroy(&res, allocator)
 						return res, .Invalid_Face
 					}
 					face^ = parsed
@@ -700,7 +706,7 @@ display_buffer_parse_line_list :: proc(
 		parsed, err := display_buffer_parse_line_with_face(content[start:end], &face, faces, builtins, allocator)
 		if err != .None {
 			for &line in lines {
-				display_buffer_line_destroy(&line)
+				client_display_line_destroy(&line, allocator)
 			}
 			delete(lines)
 			return nil, err

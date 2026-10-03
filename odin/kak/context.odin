@@ -255,8 +255,8 @@ context_jump_report_position :: proc(jl: ^Jump_List, ctx: ^Context) {
 	if face_err != .None {
 		return
 	}
-	line := display_buffer_line_make_text(text, face, ctx.allocator)
-	defer display_buffer_line_destroy(&line)
+	// Ownership transfers to the client (from_text clones).
+	line := client_display_line_from_text(text, face, ctx.allocator)
 	context_print_status(ctx, line)
 }
 
