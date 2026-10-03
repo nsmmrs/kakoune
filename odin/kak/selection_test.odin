@@ -364,3 +364,17 @@ test_selection_list_to_string_byte :: proc(t: ^testing.T) {
 	defer delete(s)
 	testing.expect_value(t, s, "2.2,2.2 3.3,3.3 1.1,1.1")
 }
+
+@(test)
+test_selection_erase_read_only_propagates :: proc(t: ^testing.T) {
+	// Coordinator integration test: buffer errors propagate through the
+	// selection cascade (C++ parity: read-only throws unwind to callers).
+	lines := [1]string{"hello"}
+	b := buffer_make("*test*", {.Read_Only}, lines[:], .None, .Lf, .Present, File_Fs_Status{}, context.allocator)
+	defer buffer_destroy(b)
+	sels := [1]Selection{selection_test_sel({0, 0}, {0, 4})}
+	list := selection_list_make(b, sels[:], buffer_timestamp(b))
+	defer selection_list_destroy(&list)
+	testing.expect_value(t, selection_list_erase(&list), Buffer_Error.Read_Only)
+	testing.expect_value(t, b.lines[0], "hello")
+}

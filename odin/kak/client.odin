@@ -1396,18 +1396,6 @@ client_manager_get_free_window :: proc(m: ^Client_Manager, buffer: ^Buffer) -> W
 	panic("STUB: client_manager_get_free_window")
 }
 
-buffer_name :: proc(b: ^Buffer) -> string {
-	panic("STUB: buffer_name")
-}
-
-buffer_is_modified :: proc(b: ^Buffer) -> bool {
-	panic("STUB: buffer_is_modified")
-}
-
-buffer_set_fs_status :: proc(b: ^Buffer, status: File_Fs_Status) {
-	panic("STUB: buffer_set_fs_status")
-}
-
 buffer_utils_reload_file_buffer :: proc(b: ^Buffer) {
 	panic("STUB: buffer_utils_reload_file_buffer")
 }

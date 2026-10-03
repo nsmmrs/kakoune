@@ -248,10 +248,3 @@ changes_lower_bound_by_last :: proc(sels: []Selection, pos: Coord_Buffer) -> int
 
 // --- Buffer stubs (owned by the buffer module; STUB protocol) ---
 
-buffer_timestamp :: proc(buffer: ^Buffer) -> int {
-	panic("STUB: buffer_timestamp")
-}
-
-buffer_changes_since :: proc(buffer: ^Buffer, timestamp: int) -> []Buffer_Change {
-	panic("STUB: buffer_changes_since")
-}

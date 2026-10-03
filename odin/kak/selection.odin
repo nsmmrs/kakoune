@@ -425,27 +425,34 @@ selection_compute_modified_ranges :: proc(buffer: ^Buffer, timestamp: int, alloc
 
 // selection_replace replaces sel with content and selects the inserted text
 // (port of the free replace).
-selection_replace :: proc(buffer: ^Buffer, sel: ^Selection, content: string) {
+selection_replace :: proc(buffer: ^Buffer, sel: ^Selection, content: string) -> Buffer_Error {
 	first := selection_first(sel)
 	last := selection_last(sel)
 	min_val := first^
 	max_val := last^
-	range := buffer_replace(buffer, min_val, buffer_char_next(buffer, max_val), content)
+	range, err := buffer_replace(buffer, min_val, buffer_char_next(buffer, max_val), content)
+	if err != .None {
+		return err
+	}
 	first^ = range.begin
 	if coord_compare(range.end, range.begin) > 0 {
 		last^ = buffer_char_prev(buffer, range.end)
 	} else {
 		last^ = range.begin
 	}
+	return .None
 }
 
 // selection_insert inserts content at pos and shifts sel past it (port of
 // the free insert). Cursor targets reset to -1, as in the C++.
-selection_insert :: proc(buffer: ^Buffer, sel: ^Selection, pos: Coord_Buffer, content: string) -> Buffer_Range {
-	range := buffer_insert(buffer, pos, content)
+selection_insert :: proc(buffer: ^Buffer, sel: ^Selection, pos: Coord_Buffer, content: string) -> (Buffer_Range, Buffer_Error) {
+	range, err := buffer_insert(buffer, pos, content)
+	if err != .None {
+		return {}, err
+	}
 	sel.anchor = buffer_clamp(buffer, selection_update_insert(sel.anchor, range.begin, range.end))
 	sel.cursor = coord_buffer_and_target(buffer_clamp(buffer, selection_update_insert(sel.cursor.coord, range.begin, range.end)))
-	return range
+	return range, .None
 }
 
 // selection_fix_overflowing_selections pulls selections pushed past the end
@@ -645,19 +652,21 @@ selection_list_sort_and_merge_overlapping :: proc(list: ^Selection_List) {
 // Selection_For_Each_Apply is applied to each selection by
 // selection_list_for_each (port of SelectionList::ApplyFunc); data is
 // caller-owned context.
-Selection_For_Each_Apply :: #type proc(data: rawptr, index: int, sel: ^Selection)
+Selection_For_Each_Apply :: #type proc(data: rawptr, index: int, sel: ^Selection) -> Buffer_Error
 
 // selection_list_for_each updates the list then applies apply to each
 // selection, keeping coordinates valid across buffer mutations (port of
 // SelectionList::for_each).
-selection_list_for_each :: proc(list: ^Selection_List, apply: Selection_For_Each_Apply, data: rawptr, may_append: bool) {
+selection_list_for_each :: proc(list: ^Selection_List, apply: Selection_For_Each_Apply, data: rawptr, may_append: bool) -> Buffer_Error {
 	selection_list_update(list)
 
 	if may_append && selection_any_overlaps(list.selections[:]) {
 		timestamp := buffer_timestamp(list.buffer)
 		for i := 0; i < len(list.selections); i += 1 {
 			changes_update_ranges(list.buffer, timestamp, list.selections[i:i + 1])
-			apply(data, i, &list.selections[i])
+			if err := apply(data, i, &list.selections[i]); err != .None {
+				return err
+			}
 		}
 	} else {
 		tracker: Forward_Changes_Tracker
@@ -667,7 +676,9 @@ selection_list_for_each :: proc(list: ^Selection_List, apply: Selection_For_Each
 			sel.cursor = coord_buffer_and_target(changes_get_new_coord_tolerant(&tracker, sel.cursor.coord))
 			// (KAK_DEBUG-only is_valid asserts omitted: release parity.)
 
-			apply(data, i, sel)
+			if err := apply(data, i, sel); err != .None {
+				return err
+			}
 
 			changes_update_buffer(&tracker, list.buffer, &list.timestamp)
 		}
@@ -675,6 +686,7 @@ selection_list_for_each :: proc(list: ^Selection_List, apply: Selection_For_Each
 
 	selection_fix_overflowing_selections(list.selections[:], list.buffer)
 	selection_list_check_invariant(list)
+	return .None
 }
 
 // Selection_Replace_Ctx is the context for selection_replace_apply.
@@ -685,24 +697,24 @@ Selection_Replace_Ctx :: struct {
 
 // selection_replace_apply replaces one selection with its string (last
 // string reused for extra selections).
-selection_replace_apply :: proc(data: rawptr, index: int, sel: ^Selection) {
+selection_replace_apply :: proc(data: rawptr, index: int, sel: ^Selection) -> Buffer_Error {
 	ctx := (^Selection_Replace_Ctx)(data)
-	selection_replace(ctx.buffer, sel, ctx.strings[min(len(ctx.strings) - 1, index)])
+	return selection_replace(ctx.buffer, sel, ctx.strings[min(len(ctx.strings) - 1, index)])
 }
 
 // selection_list_replace_strings replaces each selection with the matching
 // string (port of SelectionList::replace).
-selection_list_replace_strings :: proc(list: ^Selection_List, strings_list: []string) {
+selection_list_replace_strings :: proc(list: ^Selection_List, strings_list: []string) -> Buffer_Error {
 	if len(strings_list) == 0 {
-		return
+		return .None
 	}
 	ctx := Selection_Replace_Ctx{strings = strings_list, buffer = list.buffer}
-	selection_list_for_each(list, selection_replace_apply, &ctx, false)
+	return selection_list_for_each(list, selection_replace_apply, &ctx, false)
 }
 
 // selection_list_erase erases every selection's content (port of
 // SelectionList::erase).
-selection_list_erase :: proc(list: ^Selection_List) {
+selection_list_erase :: proc(list: ^Selection_List) -> Buffer_Error {
 	selection_list_update(list)
 	selection_list_merge_overlapping(list)
 
@@ -714,13 +726,17 @@ selection_list_erase :: proc(list: ^Selection_List) {
 		// Port of buffer_utils::erase(buffer, sel).
 		min_val := selection_basic_min(sel.basic)
 		max_val := selection_basic_max(sel.basic)
-		pos := buffer_erase(list.buffer, min_val, buffer_char_next(list.buffer, max_val))
+		pos, err := buffer_erase(list.buffer, min_val, buffer_char_next(list.buffer, max_val))
+		if err != .None {
+			return err
+		}
 		sel.anchor = pos
 		sel.cursor = coord_buffer_and_target(pos)
 		changes_update_buffer(&tracker, list.buffer, &list.timestamp)
 	}
 
 	selection_fix_overflowing_selections(list.selections[:], list.buffer)
+	return .None
 }
 
 // selection_char_count_to counts the characters of line before byte_col
@@ -955,54 +971,6 @@ selection_list_from_strings :: proc(
 }
 
 // --- Buffer / buffer_utils stubs (owned by those modules; STUB protocol) ---
-
-buffer_clamp :: proc(buffer: ^Buffer, coord: Coord_Buffer) -> Coord_Buffer {
-	panic("STUB: buffer_clamp")
-}
-
-buffer_char_next :: proc(buffer: ^Buffer, coord: Coord_Buffer) -> Coord_Buffer {
-	panic("STUB: buffer_char_next")
-}
-
-buffer_char_prev :: proc(buffer: ^Buffer, coord: Coord_Buffer) -> Coord_Buffer {
-	panic("STUB: buffer_char_prev")
-}
-
-buffer_is_valid :: proc(buffer: ^Buffer, coord: Coord_Buffer) -> bool {
-	panic("STUB: buffer_is_valid")
-}
-
-buffer_is_end :: proc(buffer: ^Buffer, coord: Coord_Buffer) -> bool {
-	panic("STUB: buffer_is_end")
-}
-
-buffer_back_coord :: proc(buffer: ^Buffer) -> Coord_Buffer {
-	panic("STUB: buffer_back_coord")
-}
-
-buffer_end_coord :: proc(buffer: ^Buffer) -> Coord_Buffer {
-	panic("STUB: buffer_end_coord")
-}
-
-buffer_line_count :: proc(buffer: ^Buffer) -> Units_LineCount {
-	panic("STUB: buffer_line_count")
-}
-
-buffer_line :: proc(buffer: ^Buffer, line: Units_LineCount) -> string {
-	panic("STUB: buffer_line")
-}
-
-buffer_replace :: proc(buffer: ^Buffer, begin, end: Coord_Buffer, content: string) -> Buffer_Range {
-	panic("STUB: buffer_replace")
-}
-
-buffer_insert :: proc(buffer: ^Buffer, pos: Coord_Buffer, content: string) -> Buffer_Range {
-	panic("STUB: buffer_insert")
-}
-
-buffer_erase :: proc(buffer: ^Buffer, begin, end: Coord_Buffer) -> Coord_Buffer {
-	panic("STUB: buffer_erase")
-}
 
 buffer_utils_get_column :: proc(buffer: ^Buffer, tabstop: Coord_Column, coord: Coord_Buffer) -> Coord_Column {
 	panic("STUB: buffer_utils_get_column")
