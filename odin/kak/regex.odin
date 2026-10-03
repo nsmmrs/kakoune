@@ -237,16 +237,23 @@ regex_search :: proc(
 }
 
 // regex_search_simple reports whether re matches anywhere in [begin, end)
-// of subject, without captures (C++ regex_search without results).
+// of subject, without captures (C++ regex_search without results). The
+// subject range is the search range (C++ keep passes begin/end as the
+// subject), so \A and \z anchor at the range edges.
+// regex_search_simple searches [begin, end) of subject for re (port
+// of the C++ regex_search free function, which takes an explicit
+// subject range: keep passes the selection range, others the whole
+// buffer).
 regex_search_simple :: proc(
 	subject: string,
 	begin, end: int,
 	re: ^Regex,
+	subject_begin, subject_end: int,
 	flags: Regex_Vm_Exec_Flags = {},
 ) -> bool {
 	vm := regex_vm_make(&re.compiled, {.Forward, .Search, .Any_Match, .No_Saves}, context.temp_allocator)
 	defer regex_vm_destroy(&vm)
-	return regex_vm_exec(&vm, subject, begin, end, 0, len(subject), flags)
+	return regex_vm_exec(&vm, subject, begin, end, subject_begin, subject_end, flags)
 }
 
 // regex_backward_search searches [begin, end) of subject backwards for re:
@@ -273,19 +280,24 @@ regex_backward_search :: proc(
 // Regex_Iterator iterates the successive matches of re over [begin, end)
 // of subject (C++ RegexIterator). It borrows the subject and the regex.
 Regex_Iterator :: struct {
-	vm:        Regex_Vm,
-	results:   Regex_Match_Results,
-	subject:   string,
-	next_pos:  int,
-	begin:     int,
-	end:       int,
-	flags:     Regex_Vm_Exec_Flags,
-	backward:  bool,
-	allocator: mem.Allocator,
+	vm:            Regex_Vm,
+	results:       Regex_Match_Results,
+	subject:       string,
+	next_pos:      int,
+	begin:         int,
+	end:           int,
+	subject_begin: int,
+	subject_end:   int,
+	flags:         Regex_Vm_Exec_Flags,
+	backward:      bool,
+	allocator:     mem.Allocator,
 }
 
 // regex_iterator_make creates a match iterator; backward selects backward
-// search (the regex must have been compiled with .Backward then).
+// search (the regex must have been compiled with .Backward then). The
+// subject range defaults to the search range (C++ 4-arg RegexIterator,
+// used for selections); pass an explicit range for the C++ 6-arg form
+// (find_opening/find_next search a window of the whole buffer).
 regex_iterator_make :: proc(
 	subject: string,
 	begin, end: int,
@@ -293,6 +305,8 @@ regex_iterator_make :: proc(
 	flags: Regex_Vm_Exec_Flags = {},
 	backward := false,
 	allocator := context.allocator,
+	subject_begin := -1,
+	subject_end := -1,
 ) -> Regex_Iterator {
 	mode := Regex_Vm_Modes{.Forward, .Search}
 	next_pos := begin
@@ -300,6 +314,8 @@ regex_iterator_make :: proc(
 		mode = {.Backward, .Search}
 		next_pos = end
 	}
+	sbegin := subject_begin if subject_begin >= 0 else begin
+	send := subject_end if subject_end >= 0 else end
 	return Regex_Iterator{
 		vm = regex_vm_make(&re.compiled, mode, allocator),
 		results = regex_match_results_make(allocator),
@@ -307,6 +323,8 @@ regex_iterator_make :: proc(
 		next_pos = next_pos,
 		begin = begin,
 		end = end,
+		subject_begin = sbegin,
+		subject_end = send,
 		flags = flags,
 		backward = backward,
 		allocator = allocator,
@@ -337,8 +355,8 @@ regex_iterator_next :: proc(it: ^Regex_Iterator) -> bool {
 			it.subject,
 			it.begin,
 			it.next_pos,
-			0,
-			len(it.subject),
+			it.subject_begin,
+			it.subject_end,
 			it.flags + additional,
 		)
 	} else {
@@ -347,8 +365,8 @@ regex_iterator_next :: proc(it: ^Regex_Iterator) -> bool {
 			it.subject,
 			it.next_pos,
 			it.end,
-			0,
-			len(it.subject),
+			it.subject_begin,
+			it.subject_end,
 			it.flags + additional,
 		)
 	}

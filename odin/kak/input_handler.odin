@@ -2461,6 +2461,7 @@ input_handler_init :: proc(h: ^Input_Handler, selections: Selection_List, flags:
 	h.recording_reg = 0
 	h.recorded_keys = make([dynamic]Keys_Key, 0, allocator)
 	h.recording_level = -1
+	h.key_error = nil
 	context_init(&h.ctx, h, selections, flags, name, allocator)
 	// NOTE: the C++ constructor emplaces the initial mode directly;
 	// push_mode reads mode_stack[-1] and traps on the empty stack.
@@ -2484,6 +2485,53 @@ input_handler_deinit :: proc(h: ^Input_Handler) {
 	delete(h.last_insert.keys)
 	delete(h.recorded_keys)
 	context_destroy(&h.ctx)
+}
+
+// input_handler_set_key_error records a sticky key failure (port of
+// the C++ exception escaping a NormalCmd): normal_fail calls this so
+// execute-keys can abort the remaining keys. The message is cloned
+// into the handler allocator, replacing any pending failure.
+input_handler_set_key_error :: proc(h: ^Input_Handler, msg: string, kind: Input_Handler_Key_Error_Kind = .Runtime) {
+	input_handler_clear_key_error(h)
+	h.key_error = Input_Handler_Key_Error{
+		kind    = kind,
+		message = strings.clone(msg, h.allocator),
+	}
+}
+
+// input_handler_has_key_error reports a pending sticky key failure.
+input_handler_has_key_error :: proc(h: ^Input_Handler) -> bool {
+	_, ok := h.key_error.?
+	return ok
+}
+
+// input_handler_clear_key_error drops any pending sticky key failure.
+input_handler_clear_key_error :: proc(h: ^Input_Handler) {
+	if err, ok := h.key_error.?; ok {
+		delete(err.message, h.allocator)
+		h.key_error = nil
+	}
+}
+
+// input_handler_take_key_error consumes the pending sticky key
+// failure, returning the message owned by allocator.
+input_handler_take_key_error :: proc(
+	h: ^Input_Handler,
+	allocator := context.allocator,
+) -> (
+	message: string,
+	kind: Input_Handler_Key_Error_Kind,
+	failed: bool,
+) {
+	err, ok := h.key_error.?
+	if !ok {
+		return "", .Runtime, false
+	}
+	message = strings.clone(err.message, allocator)
+	kind = err.kind
+	delete(err.message, h.allocator)
+	h.key_error = nil
+	return message, kind, true
 }
 
 input_handler_destroy :: proc(h: ^Input_Handler) {
@@ -2632,9 +2680,19 @@ input_handler_handle_key :: proc(h: ^Input_Handler, key: Keys_Key, synthesized: 
 		defer delete(keys)
 		append(&keys, ..mapping.keys[:])
 		count := current.vtable.take_pending_count(current.data) if mapping.atomic else 1
-		for ; count > 0; count -= 1 {
+		// A key failing mid-expansion aborts the rest (C++ throw
+		// unwinding); the sticky error stays for execute-keys. Only
+		// fresh failures abort: a stale flag from an earlier key
+		// must not skip this expansion.
+		had_error := input_handler_has_key_error(h)
+		aborted := false
+		for ; count > 0 && !aborted; count -= 1 {
 			for k in keys {
 				input_handler_process_key(h, k)
+				if !had_error && input_handler_has_key_error(h) {
+					aborted = true
+					break
+				}
 			}
 		}
 	} else {
@@ -2658,35 +2716,6 @@ input_handler_record_key :: proc(h: ^Input_Handler, key: Keys_Key) {
 
 input_handler_record_key_apply :: proc(ctx: rawptr, key: Keys_Key) {
 	input_handler_record_key(cast(^Input_Handler)(ctx), key)
-}
-
-// input_handler_set_key_error records a key-handling failure for
-// exec() to report (C++: the exception escaping handle_key). Clones
-// msg with the handler allocator, replacing any pending error.
-input_handler_set_key_error :: proc(h: ^Input_Handler, kind: Commands_Error, msg: string) {
-	input_handler_clear_key_error(h)
-	h.pending_key_error = Input_Handler_Key_Error{kind = kind, msg = strings.clone(msg, h.allocator)}
-}
-
-// input_handler_clear_key_error drops a pending key error, if any.
-input_handler_clear_key_error :: proc(h: ^Input_Handler) {
-	if err, ok := h.pending_key_error.?; ok {
-		delete(err.msg, h.allocator)
-		h.pending_key_error = nil
-	}
-}
-
-// input_handler_take_key_error takes a pending key error, cloning it
-// into allocator for the caller (which frees it there).
-input_handler_take_key_error :: proc(h: ^Input_Handler, allocator: mem.Allocator) -> (Commands_Error, string, bool) {
-	err, ok := h.pending_key_error.?
-	if !ok {
-		return .None, "", false
-	}
-	msg := strings.clone(err.msg, allocator)
-	delete(err.msg, h.allocator)
-	h.pending_key_error = nil
-	return err.kind, msg, true
 }
 
 input_handler_drop_last_recorded_key :: proc(h: ^Input_Handler) {

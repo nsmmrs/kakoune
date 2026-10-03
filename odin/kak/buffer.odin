@@ -161,12 +161,7 @@ buffer_make :: proc(
 	data.keymaps = keymap_manager_init(allocator)
 	data.aliases = Alias_Registry{aliases = make(map[string]string, allocator), allocator = allocator}
 	data.faces = face_registry_make(nil, allocator)
-	data.highlighters = Highlighters {
-		group = Highlighter_Group {
-			highlighters = make(map[string]^Highlighter, allocator),
-			allocator    = allocator,
-		},
-	}
+	highlighters_init_child(&data.highlighters, nil, allocator)
 	b.scope.data = data
 	return b
 }
@@ -211,8 +206,8 @@ buffer_destroy :: proc(b: ^Buffer) {
 		)
 		data.options.parent = nil
 	}
-	// Option/highlighter entries are owned by their unmerged modules'
-	// paths; nothing can populate them yet, so drop the containers.
+	// Option entries are owned by their unmerged modules' paths;
+	// nothing can populate them yet, so drop the containers.
 	delete(data.options.options)
 	delete(data.options.watchers)
 	delete(data.aliases.aliases)
@@ -223,7 +218,7 @@ buffer_destroy :: proc(b: ^Buffer) {
 	delete(data.hooks.hooks_trash)
 	keymap_manager_destroy(&data.keymaps)
 	face_registry_destroy(&data.faces)
-	delete(data.highlighters.group.highlighters)
+	scope_highlighters_destroy(&data.highlighters)
 	free(data, alloc)
 	free(b, alloc)
 }

@@ -59,20 +59,11 @@ scope_hook_data_destroy :: proc(hd: ^Hook_Data, allocator := context.allocator) 
 }
 
 // scope_highlighters_init builds highlighters state with parent (C++
-// Highlighters ctors: parent link plus an All-passes root group).
-scope_highlighters_init :: proc(parent: ^Highlighters, allocator := context.allocator) -> Highlighters {
-	return Highlighters {
-		parent = parent,
-		group = Highlighter_Group {
-			base = Highlighter {
-				vtable = nil,
-				passes = {.Replace, .Wrap, .Move, .Colorize},
-				data = nil,
-			},
-			highlighters = make(map[string]^Highlighter, allocator),
-			allocator = allocator,
-		},
-	}
+// Highlighters ctors: parent link plus an All-passes root group). The
+// root group is wired in place: its vtable data points at the group
+// itself, so a by-value return would dangle.
+scope_highlighters_init :: proc(h: ^Highlighters, parent: ^Highlighters, allocator := context.allocator) {
+	highlighters_init_child(h, parent, allocator)
 }
 
 // scope_highlighters_destroy frees the root group. Children destroy
@@ -99,7 +90,7 @@ scope_make :: proc(allocator := context.allocator) -> Scope {
 	data.keymaps = keymap_manager_init(allocator)
 	data.aliases = alias_registry_make_root(allocator)
 	data.faces = face_registry_make(nil, allocator)
-	data.highlighters = scope_highlighters_init(nil, allocator)
+	scope_highlighters_init(&data.highlighters, nil, allocator)
 	return Scope{data = data}
 }
 
@@ -112,7 +103,7 @@ scope_make_child :: proc(parent: ^Scope, allocator := context.allocator) -> Scop
 	data.keymaps = keymap_manager_init_child(&parent.data.keymaps, allocator)
 	data.aliases = alias_registry_make_child(&parent.data.aliases, allocator)
 	data.faces = face_registry_make(&parent.data.faces, allocator)
-	data.highlighters = scope_highlighters_init(&parent.data.highlighters, allocator)
+	scope_highlighters_init(&data.highlighters, &parent.data.highlighters, allocator)
 	return Scope{data = data}
 }
 

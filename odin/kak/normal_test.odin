@@ -460,10 +460,10 @@ normal_test_clear_flip_ensure :: proc(t: ^testing.T) {
 	}
 	normal_cmd_ensure_forward(&fix.ctx, Normal_Params{})
 	cur = context_selections(&fix.ctx).selections[0]
-	// Faithful to the C++: max() is read after anchor() was
-	// overwritten with min(), so backward selections collapse.
+	// Faithful to the C++: min and max are snapshotted before the
+	// assignment, so backward selections flip instead of collapsing.
 	testing.expect_value(t, cur.anchor, Coord_Buffer{0, 1})
-	testing.expect_value(t, cur.cursor.coord, Coord_Buffer{0, 1})
+	testing.expect_value(t, cur.cursor.coord, Coord_Buffer{0, 3})
 }
 
 @(test)
@@ -566,10 +566,10 @@ normal_test_regex_validate_no_match_stashes_error :: proc(t: ^testing.T) {
 		allocator = context.allocator,
 	}
 	normal_regex_call(&d, "", .Validate, &fix.ctx)
-	err, msg, ok := input_handler_take_key_error(&h, context.allocator)
+	msg, kind, failed := input_handler_take_key_error(&h, context.allocator)
 	defer delete(msg)
-	testing.expect(t, ok, "validating select with no matches must stash a key error")
-	testing.expect_value(t, err, Commands_Error.Error)
+	testing.expect(t, failed, "validating select with no matches must stash a key error")
+	testing.expect_value(t, kind, Input_Handler_Key_Error_Kind.Runtime)
 	testing.expect_value(t, msg, "nothing selected")
 }
 

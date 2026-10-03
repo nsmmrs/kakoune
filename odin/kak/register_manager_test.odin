@@ -236,8 +236,9 @@ register_manager_test_dynamic :: proc(t: ^testing.T) {
 	testing.expect_value(t, register_manager_test_getter_calls, 1)
 	testing.expect_value(t, len(got), 2)
 	testing.expect_value(t, got[0], "g1")
-	// get_main refreshes through get, like the C++ (StaticRegister's
-	// get_main calls the virtual get), so dynamic reads never go stale.
+
+	// get_main refreshes through the getter (C++ StaticRegister::get_main
+	// calls the virtual get), so it observes current values.
 	testing.expect_value(t, register_manager_get_main(reg, nil, 1), "g2")
 	testing.expect_value(t, register_manager_test_getter_calls, 2)
 
@@ -321,6 +322,34 @@ register_manager_test_get_by_name :: proc(t: ^testing.T) {
 
 	_, err = register_manager_get_by_name(&m, "")
 	testing.expect_value(t, err, Register_Manager_Error.No_Such_Register)
+}
+
+// Separate counter/getter for the get-main-first test: tests run
+// threaded and must not share mutable package state.
+register_manager_test_first_getter_calls := 0
+
+register_manager_test_first_getter :: proc(ctx: ^Context, allocator: mem.Allocator) -> [dynamic]string {
+	register_manager_test_first_getter_calls += 1
+	res := make([dynamic]string, allocator)
+	append(&res, strings.clone("fresh", allocator))
+	return res
+}
+
+@(test)
+register_manager_test_dynamic_get_main_first :: proc(t: ^testing.T) {
+	register_manager_test_first_getter_calls = 0
+	reg := register_manager_make_dynamic(
+		"f",
+		register_manager_test_first_getter,
+		register_manager_test_setter,
+	)
+	defer register_manager_destroy_register(reg)
+	register_manager_test_disable_hooks(reg)
+
+	// get_main with no prior get still observes fresh values: it
+	// refreshes through the getter instead of reading cold cache.
+	testing.expect_value(t, register_manager_get_main(reg, nil, 0), "fresh")
+	testing.expect_value(t, register_manager_test_first_getter_calls, 1)
 }
 
 @(test)

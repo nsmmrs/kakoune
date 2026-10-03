@@ -809,27 +809,37 @@ Input_Mode :: struct {
 	data:          rawptr,
 }
 
-// Input_Handler is C++ InputHandler. Owns context (by value) and mode stack.
-// Input_Handler_Key_Error is a stashed key-handling failure (port of
-// the C++ exception escaping handle_key): normal commands and prompt
-// callbacks cannot return errors, so failures are recorded here for
-// exec() to report, aborting the remaining keys. msg is owned by the
-// handler allocator.
-Input_Handler_Key_Error :: struct {
-	kind: Commands_Error, // .Fail or .Error
-	msg:  string,
+// Input_Handler_Key_Error_Kind ports the C++ key-failure exception
+// types: runtime_error vs no_selections_remaining (which -itersel
+// swallows per selection).
+Input_Handler_Key_Error_Kind :: enum {
+	Runtime,
+	No_Selections_Remaining,
 }
 
+// Input_Handler_Key_Error is the sticky C++ escaping-exception
+// equivalent for key handling: normal_fail records it, execute-keys
+// takes it to abort the remaining keys.
+Input_Handler_Key_Error :: struct {
+	kind:    Input_Handler_Key_Error_Kind,
+	message: string, // owned by Input_Handler.allocator
+}
+
+// Input_Handler is C++ InputHandler. Owns context (by value) and mode stack.
 Input_Handler :: struct {
-	ctx:          Context,
+	ctx:              Context,
 	mode_stack:       [dynamic]^Input_Mode,
 	last_insert:      Input_Handler_Insertion,
 	handle_key_level: int,
 	recording_reg:    rune,
 	recorded_keys:    [dynamic]Keys_Key,
 	recording_level:  int,
-	allocator:        mem.Allocator,
-	pending_key_error: Maybe(Input_Handler_Key_Error),
+	// Sticky failure from the last mishandled key (C++ exception
+	// escaping handle_key). execute-keys clears it before running
+	// and takes it after each key to abort; interactive handling
+	// leaves display to normal_fail.
+	key_error: Maybe(Input_Handler_Key_Error),
+	allocator: mem.Allocator,
 }
 
 Auto_Info_Flag :: enum {
@@ -974,9 +984,10 @@ Client_Manager :: struct {
 
 Command_Parameters :: []string
 
-// Command_Func is C++ CommandFunc. call returns the C++ exception
-// outcome: None on success, otherwise an owned message, like the
-// command cores (Fail propagates undecorated through execute).
+// Command_Func is C++ CommandFunc. call returns the C++
+// throwing-command outcome: None on success, otherwise an owned
+// message the dispatcher propagates (like the escaping C++
+// exception) to a reporting boundary.
 Command_Func :: struct {
 	call:    proc(data: rawptr, parser: ^Parameters_Parser, ctx: ^Context, shell_context: ^Shell_Context) -> (Commands_Error, string),
 	data:    rawptr,

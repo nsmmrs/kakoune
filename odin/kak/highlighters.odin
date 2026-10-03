@@ -623,6 +623,21 @@ highlighters_group_destroy_contents :: proc(group: ^Highlighter_Group) {
 	delete(group.highlighters)
 }
 
+// highlighters_child_allocator returns the allocator a new child of
+// parent must use: groups and regions destroy children with their own
+// allocator, so factory allocation has to match (the add-highlighter
+// command allocator may be short-lived). Unknown parents fall back to
+// the given allocator.
+highlighters_child_allocator :: proc(parent: ^Highlighter, fallback: mem.Allocator) -> mem.Allocator {
+	if parent.vtable == &highlighters_group_vtable {
+		return (cast(^Highlighter_Group)(parent.data)).allocator
+	}
+	if parent.vtable == &highlighters_regions_vtable {
+		return (cast(^Highlighters_Regions_Data)(parent.data)).allocator
+	}
+	return fallback
+}
+
 // Vtable adapters below: data is the ^Highlighter_Group.
 
 highlighters_group_vtable_do_highlight :: proc(

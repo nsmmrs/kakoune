@@ -206,15 +206,18 @@ client_manager_create_client :: proc(
 	sh_ctx := Shell_Context{}
 	if exec_err, exec_msg := command_manager_execute(command_manager_instance(), init_cmds, ctx, &sh_ctx, m.allocator); exec_err != .None {
 		// C++ catch (runtime_error): report the failure, run RuntimeError.
-		err_faces := context_faces(ctx)
-		err_face, err_face_err := face_registry_lookup(err_faces, "Error", m.allocator)
-		assert(err_face_err == .None)
-		// from_text clones for client ownership; the message dies
-		// after the hook below is done with it.
-		err_line := client_display_line_from_text(exec_msg, err_face, m.allocator)
-		context_print_status_simple(ctx, err_line)
-		hook_manager_run_hook(hooks, .Runtime_Error, exec_msg, ctx)
-		delete(exec_msg, m.allocator)
+		// kill_session unwinds silently past this boundary.
+		defer delete(exec_msg, m.allocator)
+		if exec_err != .Kill_Session {
+			err_faces := context_faces(ctx)
+			err_face, err_face_err := face_registry_lookup(err_faces, "Error", m.allocator)
+			assert(err_face_err == .None)
+			// from_text clones for client ownership; the message dies
+			// after the hook below is done with it.
+			err_line := client_display_line_from_text(exec_msg, err_face, m.allocator)
+			context_print_status_simple(ctx, err_line)
+			hook_manager_run_hook(hooks, .Runtime_Error, exec_msg, ctx)
+		}
 	}
 
 	for existing in m.clients {

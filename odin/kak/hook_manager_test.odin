@@ -58,12 +58,12 @@ hook_manager_test_add_remove :: proc(t: ^testing.T) {
 	ctx := Context{}
 
 	err, msg := hook_manager_add_hook(&m, .Buf_Write_Pre, "grp1", {}, hook_manager_make_filter(t, ".*"), "cmds1", &ctx)
-	testing.expect_value(t, err, Command_Manager_Error.None)
+	testing.expect_value(t, err, Commands_Error.None)
 	testing.expect_value(t, msg, "")
 	err, msg = hook_manager_add_hook(&m, .Buf_Write_Pre, "grp2", {.Once}, hook_manager_make_filter(t, ".*"), "cmds2", &ctx)
-	testing.expect_value(t, err, Command_Manager_Error.None)
+	testing.expect_value(t, err, Commands_Error.None)
 	err, msg = hook_manager_add_hook(&m, .Win_Create, "grp1", {.Always}, hook_manager_make_filter(t, ".*"), "cmds3", &ctx)
-	testing.expect_value(t, err, Command_Manager_Error.None)
+	testing.expect_value(t, err, Commands_Error.None)
 	testing.expect_value(t, len(m.hooks[int(Hook.Buf_Write_Pre)]), 2)
 	testing.expect_value(t, len(m.hooks[int(Hook.Win_Create)]), 1)
 

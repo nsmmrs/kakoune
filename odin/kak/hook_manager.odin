@@ -169,7 +169,7 @@ hook_manager_exec :: proc(
 	ctx: ^Context,
 	captures: ^Regex_Match_Results,
 	allocator := context.allocator,
-) -> (Command_Manager_Error, string) {
+) -> (Commands_Error, string) {
 	debug_opt := option_manager_get_checked(context_options(ctx), "debug")
 	debug_flags := debug_opt.value.(Option_types_Debug_Flags)
 	if .Hooks in debug_flags {
@@ -217,7 +217,7 @@ hook_manager_add_hook :: proc(
 	filter: Regex,
 	commands: string,
 	ctx: ^Context,
-) -> (Command_Manager_Error, string) {
+) -> (Commands_Error, string) {
 	data := new(Hook_Data, m.allocator)
 	data.group = strings.clone(group, m.allocator)
 	data.flags = flags

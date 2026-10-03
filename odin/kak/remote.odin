@@ -1972,13 +1972,16 @@ remote_accepter_handle :: proc(a: ^Remote_Accepter, watcher: ^Event_Manager_Fd_W
 			shell_ctx := Shell_Context{}
 			exec_err, exec_msg := command_manager_execute(command_manager_instance(), command, &ctx, &shell_ctx, s.allocator)
 			if exec_err != .None {
-				b := strings.builder_make(context.temp_allocator)
-				strings.write_string(&b, "error running command '")
-				strings.write_string(&b, command)
-				strings.write_string(&b, "': ")
-				strings.write_string(&b, exec_msg)
-				debug_write_to_debug_buffer(strings.to_string(b))
-				delete(exec_msg, s.allocator)
+				defer delete(exec_msg, s.allocator)
+				// kill_session unwinds silently (it is not an error).
+				if exec_err != .Kill_Session {
+					b := strings.builder_make(context.temp_allocator)
+					strings.write_string(&b, "error running command '")
+					strings.write_string(&b, command)
+					strings.write_string(&b, "': ")
+					strings.write_string(&b, exec_msg)
+					debug_write_to_debug_buffer(strings.to_string(b))
+				}
 			}
 		}
 		event_manager_fd_watcher_close_fd(watcher)

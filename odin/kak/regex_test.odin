@@ -91,28 +91,46 @@ regex_test_search :: proc(t: ^testing.T) {
 	defer regex_match_results_destroy(&res2)
 	testing.expect(t, !matched2)
 
-	testing.expect(t, regex_search_simple("abc123def", 0, 9, &re))
-	testing.expect(t, !regex_search_simple("abcdef", 0, 6, &re))
+	testing.expect(t, regex_search_simple("abc123def", 0, 9, &re, 0, 9))
+	testing.expect(t, !regex_search_simple("abcdef", 0, 6, &re, 0, 6))
 
 	// Boundary flags affect assertions at the subject edges: pos 4 is a
 	// genuine line start, so Not_Begin_Of_Line does not matter there, but
 	// pos 0 is only a line start without the flag.
 	bol := regex_test_make(t, `^bar`)
 	defer regex_destroy(&bol)
-	testing.expect(t, regex_search_simple("foo\nbar", 4, 7, &bol))
-	testing.expect(t, regex_search_simple("foo\nbar", 4, 7, &bol, {.Not_Begin_Of_Line}))
+	testing.expect(t, regex_search_simple("foo\nbar", 4, 7, &bol, 0, 7))
+	testing.expect(t, regex_search_simple("foo\nbar", 4, 7, &bol, 0, 7, {.Not_Begin_Of_Line}))
 	sol := regex_test_make(t, `^foo`)
 	defer regex_destroy(&sol)
-	testing.expect(t, regex_search_simple("foo\nbar", 0, 7, &sol))
+	testing.expect(t, regex_search_simple("foo\nbar", 0, 7, &sol, 0, 7))
 	testing.expect(
 		t,
-		!regex_search_simple("foo\nbar", 0, 7, &sol, {.Not_Begin_Of_Line}),
+		!regex_search_simple("foo\nbar", 0, 7, &sol, 0, 7, {.Not_Begin_Of_Line}),
 	)
 	flags := regex_match_flags(true, false, true, false)
 	testing.expect_value(
 		t,
 		flags,
 		Regex_Vm_Exec_Flags{.Not_End_Of_Line, .Not_End_Of_Word},
+	)
+}
+
+@(test)
+regex_test_search_subject_range :: proc(t: ^testing.T) {
+	// keep()-style calls pass the selection as the subject: ^bar at 4
+	// is then a subject start, so Not_Begin_Of_Line rejects it, while
+	// the whole-string subject still sees the genuine line start.
+	bol := regex_test_make(t, `^bar`)
+	defer regex_destroy(&bol)
+	testing.expect(t, regex_search_simple("foo\nbar", 4, 7, &bol, 4, 7))
+	testing.expect(
+		t,
+		!regex_search_simple("foo\nbar", 4, 7, &bol, 4, 7, {.Not_Begin_Of_Line}),
+	)
+	testing.expect(
+		t,
+		regex_search_simple("foo\nbar", 4, 7, &bol, 0, 7, {.Not_Begin_Of_Line}),
 	)
 }
 

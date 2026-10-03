@@ -1016,6 +1016,8 @@ option_manager_test_flags_options :: proc(t: ^testing.T) {
 	_, fmerr, fmsg := option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert|bogus"})
 	testing.expect_value(t, fmerr, Option_Manager_Error.Convert)
 	testing.expect_value(t, fmsg, "invalid flag value")
+	// Empty input splits to zero segments (C++ SplitView is done when
+	// pos == end), so it parses as the empty flag set, not an error.
 	v, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {""})
 	testing.expect_value(t, err, Option_Manager_Error.None)
 	testing.expect_value(t, v.(Auto_Complete), Auto_Complete{})

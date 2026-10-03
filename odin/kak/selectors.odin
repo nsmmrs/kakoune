@@ -1285,14 +1285,14 @@ selectors_find_opening_text :: proc(
 			}
 		}
 	}
-	it := regex_iterator_make(subject, 0, p, opening, {}, true, allocator)
+	it := regex_iterator_make(subject, 0, p, opening, {}, true, allocator, 0, len(subject))
 	defer regex_iterator_destroy(&it)
 	lev := level
 	cur := p
 	for regex_iterator_next(&it) {
 		m := regex_match_results_get(&it.results, 0)
 		if nestable {
-			inner := regex_iterator_make(subject, m.end, cur, closing, {}, true, allocator)
+			inner := regex_iterator_make(subject, m.end, cur, closing, {}, true, allocator, 0, len(subject))
 			for regex_iterator_next(&inner) {
 				lev += 1
 			}
@@ -1321,14 +1321,14 @@ selectors_find_closing_text :: proc(
 	first, second: int,
 	ok: bool,
 ) {
-	it := regex_iterator_make(subject, pos, len(subject), closing, {}, false, allocator)
+	it := regex_iterator_make(subject, pos, len(subject), closing, {}, false, allocator, 0, len(subject))
 	defer regex_iterator_destroy(&it)
 	lev := level
 	cur := pos
 	for regex_iterator_next(&it) {
 		m := regex_match_results_get(&it.results, 0)
 		if nestable {
-			inner := regex_iterator_make(subject, cur, m.begin, opening, {}, false, allocator)
+			inner := regex_iterator_make(subject, cur, m.begin, opening, {}, false, allocator, 0, len(subject))
 			for regex_iterator_next(&inner) {
 				lev += 1
 			}
@@ -1467,8 +1467,8 @@ selectors_regex_select_nested :: proc(
 	for sel in context_selections(ctx).selections {
 		beg := selectors_offset_of_coord(b, selection_basic_min(sel.basic))
 		end := selectors_offset_of_coord(b, buffer_char_next(b, selection_basic_max(sel.basic)))
-		open_it := regex_iterator_make(text, beg, end, opening, {}, false, allocator)
-		close_it := regex_iterator_make(text, beg, end, closing, {}, false, allocator)
+		open_it := regex_iterator_make(text, beg, end, opening, {}, false, allocator, 0, len(text))
+		close_it := regex_iterator_make(text, beg, end, closing, {}, false, allocator, 0, len(text))
 		have_open := regex_iterator_next(&open_it)
 		have_close := regex_iterator_next(&close_it)
 		have_start := false
@@ -1529,7 +1529,7 @@ selectors_regex_select_nested_delim :: proc(
 	for sel in context_selections(ctx).selections {
 		beg := selectors_offset_of_coord(b, selection_basic_min(sel.basic))
 		end := selectors_offset_of_coord(b, buffer_char_next(b, selection_basic_max(sel.basic)))
-		it := regex_iterator_make(text, beg, end, delimiter, {}, false, allocator)
+		it := regex_iterator_make(text, beg, end, delimiter, {}, false, allocator, 0, len(text))
 		have_start := false
 		start_c: Coord_Buffer
 		for regex_iterator_next(&it) {

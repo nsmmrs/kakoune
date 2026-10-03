@@ -935,7 +935,7 @@ command_manager_load_module :: proc(
 	name: string,
 	ctx: ^Context,
 	allocator := context.allocator,
-) -> (Command_Manager_Error, string) {
+) -> (Commands_Error, string) {
 	mod, found := m.modules[name]
 	if !found {
 		b := strings.builder_make(allocator)
@@ -989,14 +989,15 @@ command_manager_debug_write :: proc(parts: []string, allocator := context.alloca
 }
 
 // command_manager_execute_single_command runs one already-expanded
-// command (C++ CommandManager::execute_single_command).
+// command (C++ CommandManager::execute_single_command). The wrapper
+// outcome propagates like the escaping C++ exception.
 command_manager_execute_single_command :: proc(
 	m: ^Command_Manager,
 	params: []string,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
 	allocator := context.allocator,
-) -> (Command_Manager_Error, string) {
+) -> (Commands_Error, string) {
 	if len(params) == 0 {
 		return .None, ""
 	}
@@ -1042,27 +1043,21 @@ command_manager_execute_single_command :: proc(
 		debug_write_to_debug_buffer(msg)
 		delete(msg, allocator)
 	}
-	// C++ parity: the command body rethrows through execute.
-	// Kill_Session already removed every client (and recorded its
-	// status), so it completes successfully here.
-	if call_err == .Fail {
-		return .Fail, call_msg
-	} else if call_err == .Error {
-		return .Error, call_msg
-	}
-	return .None, ""
+	return call_err, call_msg
 }
 
 // command_manager_execute runs a command line, splitting it at command
-// separators (C++ CommandManager::execute). .Fail propagates undecorated;
-// other errors are prefixed with "line:col: 'command': ".
+// separators (C++ CommandManager::execute). .Fail and .Kill_Session
+// propagate undecorated; .Error and .No_Selections_Remaining are
+// prefixed with "line:col: 'command': " (C++ decorates
+// no_selections_remaining too, keeping its type).
 command_manager_execute :: proc(
 	m: ^Command_Manager,
 	command_line: string,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
 	allocator := context.allocator,
-) -> (Command_Manager_Error, string) {
+) -> (Commands_Error, string) {
 	parser := command_manager_parser_make(command_line)
 	// C++ Context::scope parity: innermost local scope, else window
 	// scope, else global. (The buffer fallback needs unmerged context
@@ -1086,7 +1081,9 @@ command_manager_execute :: proc(
 	for {
 		tok, ok, tok_err, tok_msg := command_manager_read_token(&parser, true, allocator)
 		if tok_err != .None {
-			return tok_err, tok_msg
+			// Tokenizer failures are plain errors (C++ parse_error
+			// is a runtime_error).
+			return .Error, tok_msg
 		}
 		if !ok || tok.type == .Command_Separator {
 			if ok {
@@ -1094,8 +1091,12 @@ command_manager_execute :: proc(
 			}
 			exec_err, exec_msg := command_manager_execute_single_command(m, params[:], ctx, shell_ctx, allocator)
 			if exec_err != .None {
-				if exec_err == .Fail {
-					return .Fail, exec_msg
+				if exec_err == .Fail || exec_err == .Kill_Session {
+					return exec_err, exec_msg
+				}
+				kind := Commands_Error.Error
+				if exec_err == .No_Selections_Remaining {
+					kind = .No_Selections_Remaining
 				}
 				coord := command_manager_compute_coord(command_line[:command_pos])
 				b := strings.builder_make(allocator)
@@ -1107,7 +1108,7 @@ command_manager_execute :: proc(
 				strings.write_string(&b, "': ")
 				strings.write_string(&b, exec_msg)
 				delete(exec_msg, allocator)
-				return .Error, strings.to_string(b)
+				return kind, strings.to_string(b)
 			}
 			if !ok {
 				return .None, ""
@@ -1129,7 +1130,9 @@ command_manager_execute :: proc(
 		} else {
 			exp_err, exp_msg := command_manager_expand_token_multi(tok, ctx, shell_ctx, &params, allocator)
 			if exp_err != .None {
-				return exp_err, exp_msg
+				// Expansion failures are plain errors (C++
+				// runtime_error from shell/option expansion).
+				return .Error, exp_msg
 			}
 		}
 	}

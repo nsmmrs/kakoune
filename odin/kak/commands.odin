@@ -41,12 +41,16 @@ import "core:sys/posix"
 
 // Commands_Error ports the C++ command outcomes. None is success; Error
 // carries an owned message, Fail propagates undecorated like C++ failure,
-// Kill_Session asks the main loop to exit with commands_kill_status.
+// Kill_Session asks the main loop to exit with commands_kill_status,
+// No_Selections_Remaining ports C++ no_selections_remaining (a
+// runtime_error subclass): try catches it like Error, while -itersel
+// swallows it per selection.
 Commands_Error :: enum {
 	None,
 	Error,
 	Fail,
 	Kill_Session,
+	No_Selections_Remaining,
 }
 
 // Commands_Env bundles the singletons command cores need. Wrappers fill
@@ -769,8 +773,9 @@ commands_cycle_buffer :: proc(
 	}
 }
 
-// commands_shared_highlighters is the port of SharedHighlighters: a
-// group shell with a nil vtable until the highlighters module merges.
+// commands_shared_highlighters is the port of SharedHighlighters,
+// wired lazily by commands_highlighter_group_for_scope (a global has
+// no construction point; the group data points at itself).
 commands_shared_highlighters := Highlighter_Group{}
 
 // commands_highlighter_group_for_scope resolves the highlighter group
@@ -781,7 +786,17 @@ commands_highlighter_group_for_scope :: proc(
 	env: ^Commands_Env,
 ) -> ^Highlighter_Group {
 	if scope_name == "shared" {
-		return &commands_shared_highlighters
+		group := &commands_shared_highlighters
+		if group.base.vtable == nil {
+			group.base = Highlighter{
+				vtable = &highlighters_group_vtable,
+				passes = highlighters_pass_all,
+				data   = group,
+			}
+			group.highlighters = make(map[string]^Highlighter, context.allocator)
+			group.allocator = context.allocator
+		}
+		return group
 	}
 	if s := commands_scope_ifp(scope_name, ctx, env.buffers, env.global); s != nil {
 		return &s.data.highlighters.group
@@ -790,9 +805,9 @@ commands_highlighter_group_for_scope :: proc(
 }
 
 // commands_get_highlighter resolves a highlighter path to its root
-// group and the addressed highlighter (C++ get_highlighter). Scope
-// groups carry a nil vtable until the highlighters module merges;
-// that reports an error instead of crashing.
+// group and the addressed highlighter (C++ get_highlighter). A group
+// with a nil vtable (only hand-built test scopes; every real scope is
+// wired at creation) reports an error instead of crashing.
 commands_get_highlighter :: proc(
 	ctx: ^Context,
 	env: ^Commands_Env,
@@ -836,7 +851,7 @@ commands_get_highlighter :: proc(
 	}
 	if base.vtable == nil {
 		serr, smsg := commands_errorf(
-			"highlighter groups are unavailable (highlighters module not ported)",
+			"highlighter group is not initialized",
 			{},
 			allocator,
 		)
@@ -1048,6 +1063,7 @@ commands_input_handler_init :: proc(
 	h.recording_reg = 0
 	h.recorded_keys = make([dynamic]Keys_Key, 0, allocator)
 	h.recording_level = -1
+	h.key_error = nil
 	context_init(&h.ctx, h, selections, flags, name, allocator)
 	mode := input_handler_normal_make(h, false)
 	append(&h.mode_stack, mode)
@@ -1206,6 +1222,12 @@ commands_context_wrap_itersel :: proc(
 		selection_list_update(context_selections_write_only(ctx))
 
 		ferr, fmsg := func(p, ctx, shell_ctx, env, allocator)
+		if ferr == .No_Selections_Remaining {
+			// C++ catches no_selections_remaining per selection
+			// and keeps iterating.
+			delete(fmsg, allocator)
+			continue
+		}
 		if ferr != .None {
 			return ferr, fmsg
 		}
@@ -1237,7 +1259,8 @@ commands_context_wrap_itersel :: proc(
 		target := context_selections_write_only(ctx)
 		selection_list_destroy(target)
 		target^ = selection_list_clone(&sels, allocator)
-		return commands_errorf("no selections remaining", {}, allocator)
+		// C++ rethrows no_selections_remaining here.
+		return .No_Selections_Remaining, strings.clone("no selections remaining", allocator)
 	}
 	if !draft {
 		target := context_selections_write_only(ctx)
@@ -4066,7 +4089,8 @@ commands_kill :: proc(
 		client_manager_remove_client(env.clients, client, true, status)
 	}
 	commands_kill_status = status
-	return .Kill_Session, ""
+	// Owned (possibly empty) message: every boundary deletes it.
+	return .Kill_Session, strings.clone("", allocator)
 }
 
 // commands_daemonize_session marks the server daemonized (C++
@@ -4374,17 +4398,26 @@ commands_add_highlighter :: proc(
 	}
 	if parent.vtable == nil {
 		return commands_errorf(
-			"highlighter groups are unavailable (highlighters module not ported)",
+			"highlighter group is not initialized",
 			{},
 			allocator,
 		)
 	}
-	child := entry.factory(hl_params[:], parent, allocator)
+	// Factories yield nil on invalid parameters (their C++ counterparts
+	// throw); the group takes ownership on success, so allocate with
+	// the owner's allocator rather than this command's. On failure the
+	// caller retains ownership (C++ UniquePtr), so destroy it here.
+	child_alloc := highlighters_child_allocator(parent, allocator)
+	child := entry.factory(hl_params[:], parent, child_alloc)
+	if child == nil {
+		return commands_errorf("cannot add highlighter '{}'", {path}, allocator)
+	}
 	_, override := parameters_parser_get_switch(p, "override")
 	if herr := highlighter_add_child(parent, name, child, override); herr != .None {
+		highlighter_destroy(child, child_alloc)
 		if herr == .No_Children {
 			return commands_errorf(
-				"highlighter groups are unavailable (highlighters module not ported)",
+				"this highlighter does not hold children",
 				{},
 				allocator,
 			)
@@ -4426,7 +4459,7 @@ commands_remove_highlighter :: proc(
 	}
 	if parent.vtable == nil {
 		return commands_errorf(
-			"highlighter groups are unavailable (highlighters module not ported)",
+			"highlighter group is not initialized",
 			{},
 			allocator,
 		)
@@ -4506,7 +4539,7 @@ commands_hook :: proc(
 		regex_destroy(&filter)
 		return serr, smsg
 	}
-	herr, hmsg := hook_manager_add_hook(
+	return hook_manager_add_hook(
 		&scope.data.hooks,
 		hook,
 		group,
@@ -4515,13 +4548,6 @@ commands_hook :: proc(
 		parameters_parser_positional(p, 3),
 		ctx,
 	)
-	if herr != .None {
-		if herr == .Fail {
-			return .Fail, hmsg
-		}
-		return .Error, hmsg
-	}
-	return .None, ""
 }
 
 // commands_remove_hooks removes hooks by group (C++ remove_hook_cmd).
@@ -5283,6 +5309,11 @@ commands_source :: proc(
 		delete(msg, allocator)
 	}
 	if exec_err != .None {
+		// C++ source_cmd unwinding: kill_session propagates without
+		// a debug note; other failures are logged, then propagate.
+		if exec_err == .Kill_Session {
+			return .Kill_Session, exec_msg
+		}
 		dbg, ferr := format_format(
 			"{}:{}",
 			{parameters_parser_positional(p, 0), exec_msg},
@@ -5291,10 +5322,7 @@ commands_source :: proc(
 		assert(ferr == .None)
 		commands_write_to_debug_buffer(dbg, env.buffers, allocator)
 		delete(dbg, allocator)
-		if exec_err == .Fail {
-			return .Fail, exec_msg
-		}
-		return .Error, exec_msg
+		return exec_err, exec_msg
 	}
 	return .None, ""
 }
@@ -5655,9 +5683,9 @@ commands_execute_keys_body :: proc(
 	defer utils_scoped_bool_release(&hooks_guard)
 
 	handler := context_input_handler(ctx)
-	// Only errors from this exec's keys are reported; stale interactive
-	// failures must not abort it (the C++ unwinds instead, aborting the
-	// remaining keys on the first failure, as below).
+	// A failing key aborts the remaining keys (C++ handle_key
+	// throw); the sticky error becomes this command's error so try
+	// can catch it.
 	input_handler_clear_key_error(handler)
 	for i in 0 ..< parameters_parser_positional_count(p) {
 		keys, kerr, kmsg := commands_parse_keys(
@@ -5669,9 +5697,12 @@ commands_execute_keys_body :: proc(
 		}
 		for key in keys {
 			input_handler_handle_key(handler, key)
-			if key_err, key_msg, ok := input_handler_take_key_error(handler, allocator); ok {
+			if fail_msg, fail_kind, failed := input_handler_take_key_error(handler, allocator); failed {
 				delete(keys)
-				return key_err, key_msg
+				if fail_kind == .No_Selections_Remaining {
+					return .No_Selections_Remaining, fail_msg
+				}
+				return .Error, fail_msg
 			}
 		}
 		delete(keys)
@@ -5729,37 +5760,23 @@ commands_evaluate_commands_body :: proc(
 			}
 			delete(params)
 		}
-		exec_err, exec_msg := command_manager_execute_single_command(
+		return command_manager_execute_single_command(
 			command_manager_instance(),
 			params[:],
 			ctx,
 			shell_ctx,
 			allocator,
 		)
-		if exec_err != .None {
-			if exec_err == .Fail {
-				return .Fail, exec_msg
-			}
-			return .Error, exec_msg
-		}
-		return .None, ""
 	}
 	joined := commands_join_positionals(p, allocator)
 	defer delete(joined, allocator)
-	exec_err, exec_msg := command_manager_execute(
+	return command_manager_execute(
 		command_manager_instance(),
 		joined,
 		ctx,
 		shell_ctx,
 		allocator,
 	)
-	if exec_err != .None {
-		if exec_err == .Fail {
-			return .Fail, exec_msg
-		}
-		return .Error, exec_msg
-	}
-	return .None, ""
 }
 
 // commands_evaluate_commands evaluates commands (C++
@@ -6015,6 +6032,11 @@ commands_try :: proc(
 			if exec_err == .None {
 				return .None, ""
 			}
+			// C++ kill_session is not a runtime_error: it unwinds
+			// through try instead of running the catch blocks.
+			if exec_err == .Kill_Session {
+				return .Kill_Session, exec_msg
+			}
 			if have_error_ctx {
 				commands_destroy_shell_context(&error_ctx, allocator)
 			}
@@ -6027,20 +6049,14 @@ commands_try :: proc(
 				error_ctx.env_vars[strings.clone("error", allocator)] = exec_msg
 			}
 		} else {
-			exec_err, exec_msg := command_manager_execute(
+			// The last catch block's outcome (all kinds) propagates.
+			return command_manager_execute(
 				m,
 				parameters_parser_positional(p, i),
 				ctx,
 				active,
 				allocator,
 			)
-			if exec_err != .None {
-				if exec_err == .Fail {
-					return .Fail, exec_msg
-				}
-				return .Error, exec_msg
-			}
-			return .None, ""
 		}
 	}
 	return .None, ""
@@ -6484,19 +6500,12 @@ commands_require_module :: proc(
 	Commands_Error,
 	string,
 ) {
-	merr, mmsg := command_manager_load_module(
+	return command_manager_load_module(
 		env.commands,
 		parameters_parser_positional(p, 0),
 		ctx,
 		allocator,
 	)
-	if merr != .None {
-		if merr == .Fail {
-			return .Fail, mmsg
-		}
-		return .Error, mmsg
-	}
-	return .None, ""
 }
 
 // ---------------------------------------------------------------------------
@@ -6535,19 +6544,13 @@ commands_defined_command_call :: proc(
 		params = owned[:]
 	}
 	sc := Shell_Context{params = params, env_vars = shell_ctx.env_vars}
-	exec_err, exec_msg := command_manager_execute(
+	return command_manager_execute(
 		command_manager_instance(),
 		stored.commands,
 		ctx,
 		&sc,
 		allocator,
 	)
-	if exec_err == .Fail {
-		return .Fail, exec_msg
-	} else if exec_err != .None {
-		return .Error, exec_msg
-	}
-	return .None, ""
 }
 
 commands_defined_command_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
@@ -6644,10 +6647,18 @@ commands_prompt_callback_call :: proc(
 	delete(stored.env_vars["text"], stored.allocator)
 	delete(key, stored.allocator)
 	delete_key(&stored.env_vars, "text")
-	if exec_err != .None {
-		commands_report(.Error, exec_msg, ctx)
-		hook_manager_run_hook(context_hooks(ctx), .Runtime_Error, exec_msg, ctx)
+	// C++ prompt callback boundary: kill_session unwinds silently
+	// (no report, no hook); other failures report and run
+	// RuntimeError. The error message is owned here.
+	if exec_err == .None {
+		return
 	}
+	defer delete(exec_msg, ctx.allocator)
+	if exec_err == .Kill_Session {
+		return
+	}
+	commands_report(exec_err, exec_msg, ctx)
+	hook_manager_run_hook(context_hooks(ctx), .Runtime_Error, exec_msg, ctx)
 }
 
 commands_prompt_callback_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
@@ -6694,11 +6705,16 @@ commands_on_key_callback_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context
 		&sc,
 		ctx.allocator,
 	)
-	if exec_err == .Fail {
-		commands_report(.Fail, exec_msg, ctx)
-	} else if exec_err != .None {
-		commands_report(.Error, exec_msg, ctx)
+	// C++ on-key callback boundary: kill_session unwinds silently;
+	// other failures report. The error message is owned here.
+	if exec_err == .None {
+		return
 	}
+	defer delete(exec_msg, ctx.allocator)
+	if exec_err == .Kill_Session {
+		return
+	}
+	commands_report(exec_err, exec_msg, ctx)
 }
 
 commands_on_key_callback_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
@@ -6856,8 +6872,12 @@ commands_user_mode_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 		keys_copy := make([dynamic]Keys_Key, len(mapping.keys), ctx.allocator)
 		defer delete(keys_copy)
 		copy(keys_copy[:], mapping.keys[:])
+		had_error := input_handler_has_key_error(ctx.input_handler)
 		for k in keys_copy {
 			input_handler_handle_key(ctx.input_handler, k)
+			if !had_error && input_handler_has_key_error(ctx.input_handler) {
+				break
+			}
 		}
 	}
 	if stored.lock {

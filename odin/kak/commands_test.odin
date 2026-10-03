@@ -594,6 +594,41 @@ test_commands_try_catch :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_commands_try_fail_caught :: proc(t: ^testing.T) {
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	exec_local := scope_local_make(&ctx, &buf.scope, f.allocator)
+	defer scope_local_destroy(exec_local, f.allocator)
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+
+	// Fail-kind errors propagate out of the failing command (C++
+	// throwing model) so try/catch observes them.
+	p, spec, _ := test_commands_parse(
+		f,
+		"try",
+		{"fail oops", "catch", "define-command failmarker nop"},
+	)
+	defer test_commands_free_parse(f, &p, &spec)
+	err, msg := commands_try(&p, &ctx, &sc, f.allocator)
+	if err != .None {
+		test_commands_free_msg(msg, f.allocator)
+	}
+	testing.expect_value(t, err, Commands_Error.None)
+	testing.expect(
+		t,
+		command_manager_command_defined(command_manager_instance(), "failmarker"),
+	)
+}
+
+@(test)
 test_commands_try_no_catch_swallows :: proc(t: ^testing.T) {
 	sync.lock(&test_commands_singleton_mutex)
 	defer sync.unlock(&test_commands_singleton_mutex)
@@ -1326,7 +1361,7 @@ test_commands_defined_command_call :: proc(t: ^testing.T) {
 	if exec_err != .None {
 		test_commands_free_msg(exec_msg, f.allocator)
 	}
-	testing.expect_value(t, exec_err, Command_Manager_Error.None)
+	testing.expect_value(t, exec_err, Commands_Error.None)
 	testing.expect(
 		t,
 		command_manager_command_defined(command_manager_instance(), "innermarker"),
@@ -2135,6 +2170,33 @@ test_commands_evaluate_draft_itersel :: proc(t: ^testing.T) {
 		test_commands_free_msg(msg3, f.allocator)
 	}
 	testing.expect_value(t, err3, Commands_Error.None)
+}
+
+@(test)
+test_commands_itersel_fail_propagates :: proc(t: ^testing.T) {
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello", "world"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	exec_local := scope_local_make(&ctx, &buf.scope, f.allocator)
+	defer scope_local_destroy(exec_local, f.allocator)
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+
+	// Non-no-selections failures propagate out of -itersel (only
+	// No_Selections_Remaining is swallowed per selection).
+	p, spec, _ := test_commands_parse(f, "evaluate-commands", {"-itersel", "fail x"})
+	defer test_commands_free_parse(f, &p, &spec)
+	err, msg := commands_evaluate_commands(&p, &ctx, &sc, &f.env, f.allocator)
+	if err != .None {
+		test_commands_free_msg(msg, f.allocator)
+	}
+	testing.expect_value(t, err, Commands_Error.Fail)
 }
 
 @(test)

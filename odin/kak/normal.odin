@@ -3,10 +3,13 @@
 //
 // Mapping notes:
 //   * C++ throws (runtime_error, no_selections_remaining) at the void
-//     NormalCmd boundary become status-line reports through
-//     normal_fail: the C++ main loop catches escaping exceptions and
-//     shows them, which is exactly what normal_fail does. Fallible
-//     helpers return Normal_Error so tests can assert on them.
+//     NormalCmd boundary become status-line reports plus a sticky
+//     input-handler key error through normal_fail: the C++ main loop
+//     catches escaping exceptions and shows them, and execute-keys
+//     takes the sticky error to abort the remaining keys.
+//     normal_fail_error preserves the no-selections kind so -itersel
+//     can swallow it per selection. Fallible helpers return
+//     Normal_Error so tests can assert on them.
 //   * C++ Optional<Selection> becomes (Selection, bool); C++ lambdas
 //     capturing counts/flags become normal_Select_Func procs taking an
 //     explicit data pointer, with heap data structs for the prompt and
@@ -88,8 +91,15 @@ normal_Select_Flag :: enum {
 normal_Select_Func :: #type proc(data: rawptr, ctx: ^Context, sel: Selection) -> (Selection, bool)
 
 // normal_fail reports a command failure on the status line (port of
-// the C++ main-loop catch around key handling: show and abort).
-normal_fail :: proc(ctx: ^Context, msg: string) {
+// the C++ main-loop catch around key handling: show and abort). It
+// also records the sticky key error (port of the escaping C++
+// exception) so execute-keys aborts the remaining keys and try can
+// catch the failure; recording is not gated on a client because
+// draft contexts have none.
+normal_fail :: proc(ctx: ^Context, msg: string, kind: Input_Handler_Key_Error_Kind = .Runtime) {
+	if ctx.input_handler != nil {
+		input_handler_set_key_error(ctx.input_handler, msg, kind)
+	}
 	if ctx.client == nil {
 		return
 	}
@@ -98,6 +108,17 @@ normal_fail :: proc(ctx: ^Context, msg: string) {
 	prompt := client_display_line_from_text("", Face{})
 	content := client_display_line_from_text(msg, Face{})
 	client_print_status(ctx.client, prompt, content, Units_ColumnCount(0), .Status)
+}
+
+// normal_fail_error reports a Normal_Error like normal_fail,
+// preserving the no-selections kind for -itersel (C++
+// no_selections_remaining).
+normal_fail_error :: proc(ctx: ^Context, err: Normal_Error) {
+	kind := Input_Handler_Key_Error_Kind.Runtime
+	if err == .No_Selections_Remaining {
+		kind = .No_Selections_Remaining
+	}
+	normal_fail(ctx, normal_error_message(err), kind)
 }
 
 // normal_print_info shows an informational status message (port of
@@ -236,7 +257,7 @@ normal_Last_Select_Data :: struct {
 normal_last_select_call :: proc(data: rawptr, ctx: ^Context) {
 	d := cast(^normal_Last_Select_Data)(data)
 	if err := normal_select(ctx, d.mode, d.func, d.data); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
@@ -510,7 +531,7 @@ normal_goto_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 		sign := Units_LineCount(1) if lower == 'd' else Units_LineCount(-1)
 		offset := sign * Units_LineCount(max(d.count, 1))
 		if err := normal_select(ctx, d.mode, normal_goto_offset_apply, &offset); err != .None {
-			normal_fail(ctx, normal_error_message(err))
+			normal_fail_error(ctx, err)
 		}
 	case 'f':
 		normal_goto_file(ctx, d)
@@ -918,11 +939,11 @@ normal_command_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx
 			command_manager_instance(), cmdline, ctx, &shell_ctx, context.temp_allocator,
 		); err != .None {
 			defer delete(msg, context.temp_allocator)
-			normal_fail(ctx, msg)
-			// The C++ lets the error throw to exec(); stash it for
-			// exec() to report since this callback cannot return it.
-			kind := Commands_Error.Error if err == .Error else .Fail
-			input_handler_set_key_error(context_input_handler(ctx), kind, msg)
+			// C++ kill_session unwinds silently past the
+			// Client::handle_key boundary too.
+			if err != .Kill_Session {
+				normal_fail(ctx, msg)
+			}
 		} else {
 			delete(msg, context.temp_allocator)
 		}
@@ -2044,6 +2065,7 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 	}
 	regex_failed := false
 	runtime_failed := false
+	runtime_kind := Input_Handler_Key_Error_Kind.Runtime
 	detail := ""
 	switch event {
 	case .Abort:
@@ -2072,6 +2094,7 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 			runtime_failed = true
 			if err == .No_Selections_Remaining {
 				detail = normal_error_message(err)
+				runtime_kind = .No_Selections_Remaining
 			} else {
 				detail = apply_detail
 			}
@@ -2080,9 +2103,6 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 	if regex_failed {
 		if event == .Validate {
 			normal_fail(ctx, "regex error")
-			// The C++ throws to exec(); stash it for exec() to
-			// report since this callback cannot return it.
-			input_handler_set_key_error(context_input_handler(ctx), .Error, "regex error")
 		} else {
 			input_handler_set_prompt_face(context_input_handler(ctx), input_handler_face(context_faces(ctx), "Error"))
 		}
@@ -2091,11 +2111,7 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 	if runtime_failed {
 		context_assign_selections(ctx, d.saved_selections)
 		if event == .Validate {
-			normal_fail(ctx, detail)
-			// The C++ assigns the empty selection list and the next
-			// command throws; fail here instead since the port keeps
-			// selections non-empty.
-			input_handler_set_key_error(context_input_handler(ctx), .Error, detail)
+			normal_fail(ctx, detail, runtime_kind)
 		}
 	}
 }
@@ -2400,7 +2416,7 @@ normal_keep_apply :: proc(ctx: ^Context, re: ^Regex, matching: bool) -> (Normal_
 			selectors_is_bol(begin), false,
 			selectors_is_bow(buffer, begin), selectors_is_eow(buffer, end),
 		)
-		if regex_search_simple(text, begin_off, end_off, re, flags) == matching {
+		if regex_search_simple(text, begin_off, end_off, re, begin_off, end_off, flags) == matching {
 			append(&keep, sel)
 		}
 	}
@@ -2468,7 +2484,7 @@ normal_keep_pipe_call :: proc(data: rawptr, text: string, event: Prompt_Event, c
 		}
 	}
 	if len(keep) == 0 {
-		normal_fail(ctx, normal_error_message(.No_Selections_Remaining))
+		normal_fail(ctx, normal_error_message(.No_Selections_Remaining), .No_Selections_Remaining)
 		return
 	}
 	if new_main == -1 {
@@ -2775,7 +2791,7 @@ normal_object_nested_run :: proc(ctx: ^Context, d: ^normal_Object_Data) -> Norma
 normal_object_nested_last_call :: proc(data: rawptr, ctx: ^Context) {
 	d := cast(^normal_Object_Data)(data)
 	if err := normal_object_nested_run(ctx, d); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
@@ -2786,7 +2802,7 @@ normal_object_select :: proc(ctx: ^Context, d: ^normal_Object_Data, nested: bool
 		record := cast(^normal_Object_Data)(normal_object_data_clone(d, ctx.allocator))
 		context_set_last_select(ctx, normal_object_nested_last_call, record, normal_object_data_destroy)
 		if err := normal_object_nested_run(ctx, d); err != .None {
-			normal_fail(ctx, normal_error_message(err))
+			normal_fail_error(ctx, err)
 		}
 		return
 	}
@@ -2794,7 +2810,7 @@ normal_object_select :: proc(ctx: ^Context, d: ^normal_Object_Data, nested: bool
 		ctx, d.mode, normal_object_apply, d,
 		normal_object_data_destroy, normal_object_data_clone,
 	); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
@@ -3277,7 +3293,7 @@ normal_to_char_key_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 		ctx, mode, normal_to_char_apply, &apply_data,
 		normal_to_char_data_destroy, normal_to_char_data_clone,
 	); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
@@ -3356,9 +3372,21 @@ normal_cmd_replay_macro :: proc(ctx: ^Context, params: Normal_Params) {
 	guard := utils_scoped_bool_make(context_keymaps_disabled(ctx))
 	defer utils_scoped_bool_release(&guard)
 	count := params.count
-	for {
+	// A failing replayed key aborts the macro (C++ throw
+	// unwinding); only fresh failures abort, like handle_key.
+	handler := context_input_handler(ctx)
+	had_error := input_handler_has_key_error(handler)
+	aborted := false
+	for !aborted {
 		for key in keys {
-			input_handler_handle_key(context_input_handler(ctx), key)
+			input_handler_handle_key(handler, key)
+			if !had_error && input_handler_has_key_error(handler) {
+				aborted = true
+				break
+			}
+		}
+		if aborted {
+			break
 		}
 		count -= 1
 		if count <= 0 {
@@ -3380,9 +3408,6 @@ normal_cmd_jump :: proc(ctx: ^Context, params: Normal_Params, direction: Directi
 	}
 	if err != .None {
 		normal_fail(ctx, context_error_message(err))
-		// The C++ throws to exec(); stash it for exec() to report
-		// since normal commands cannot return errors.
-		input_handler_set_key_error(context_input_handler(ctx), .Error, context_error_message(err))
 		return
 	}
 	old_buffer := context_buffer(ctx)
@@ -3655,7 +3680,7 @@ normal_cmd_trim_selections :: proc(ctx: ^Context, params: Normal_Params) {
 		input_handler_sel_set_min_max(sel, new_min, new_max)
 	}
 	if len(to_remove) == len(sels.selections) {
-		normal_fail(ctx, normal_error_message(.No_Selections_Remaining))
+		normal_fail(ctx, normal_error_message(.No_Selections_Remaining), .No_Selections_Remaining)
 		return
 	}
 	for i := len(to_remove) - 1; i >= 0; i -= 1 {
@@ -4128,8 +4153,12 @@ normal_user_mapping_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 	// Copy: reentrant unmap may free the mapping mid-replay.
 	keys := slice.clone(mapping.keys[:], context.temp_allocator)
 	defer delete(keys)
+	had_error := input_handler_has_key_error(handler)
 	for k in keys {
 		input_handler_handle_key(handler, k)
+		if !had_error && input_handler_has_key_error(handler) {
+			break
+		}
 	}
 }
 
@@ -4241,7 +4270,7 @@ normal_cmd_remove_selection :: proc(ctx: ^Context, params: Normal_Params) {
 		return
 	}
 	if len(sels.selections) == 1 {
-		normal_fail(ctx, normal_error_message(.No_Selections_Remaining))
+		normal_fail(ctx, normal_error_message(.No_Selections_Remaining), .No_Selections_Remaining)
 		return
 	}
 	selection_list_remove(sels, index)
@@ -4275,8 +4304,12 @@ normal_cmd_ensure_forward :: proc(ctx: ^Context, params: Normal_Params) {
 	edition := context_scoped_selection_edition_make(ctx)
 	defer context_scoped_selection_edition_destroy(&edition)
 	for &sel in context_selections(ctx).selections {
-		sel.anchor = input_handler_sel_min(&sel)
-		sel.cursor = coord_buffer_and_target(input_handler_sel_max(&sel))
+		// Snapshot both ends first (C++ const min/max): assigning
+		// anchor before reading max would collapse the selection.
+		min := input_handler_sel_min(&sel)
+		max := input_handler_sel_max(&sel)
+		sel.anchor = min
+		sel.cursor = coord_buffer_and_target(max)
 	}
 }
 
@@ -4343,7 +4376,7 @@ normal_select_repeated :: proc(ctx: ^Context, params: Normal_Params, mode: norma
 	count := params.count
 	for {
 		if err := normal_select(ctx, mode, func); err != .None {
-			normal_fail(ctx, normal_error_message(err))
+			normal_fail_error(ctx, err)
 			return
 		}
 		count -= 1
@@ -4741,42 +4774,42 @@ normal_key_line_begin_extend :: proc(ctx: ^Context, params: Normal_Params) {
 normal_key_lines :: proc(ctx: ^Context, params: Normal_Params) {
 	_ = params
 	if err := normal_select(ctx, .Replace, normal_sel_lines); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
 normal_key_trim_partial_lines :: proc(ctx: ^Context, params: Normal_Params) {
 	_ = params
 	if err := normal_select(ctx, .Replace, normal_sel_trim_partial_lines); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
 normal_key_matching :: proc(ctx: ^Context, params: Normal_Params) {
 	_ = params
 	if err := normal_select(ctx, .Replace, normal_sel_matching_forward); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
 normal_key_matching_backward :: proc(ctx: ^Context, params: Normal_Params) {
 	_ = params
 	if err := normal_select(ctx, .Replace, normal_sel_matching_backward); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
 normal_key_matching_extend :: proc(ctx: ^Context, params: Normal_Params) {
 	_ = params
 	if err := normal_select(ctx, .Extend, normal_sel_matching_forward); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 
 normal_key_matching_backward_extend :: proc(ctx: ^Context, params: Normal_Params) {
 	_ = params
 	if err := normal_select(ctx, .Extend, normal_sel_matching_backward); err != .None {
-		normal_fail(ctx, normal_error_message(err))
+		normal_fail_error(ctx, err)
 	}
 }
 

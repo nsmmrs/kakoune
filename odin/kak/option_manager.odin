@@ -149,13 +149,10 @@ option_manager_flags_to_string :: proc(flags: $F, descs: []Enum_Desc($G), alloca
 // including on empty segments, so "" itself is invalid).
 option_manager_flags_from_string :: proc($F: typeid, $G: typeid, s: string, descs: []Enum_Desc(G), allocator := context.allocator) -> (F, bool) {
 	_ = allocator
-	// The C++ split view yields zero parts for an empty string, so an
-	// empty spec means empty flags (only interior empty parts error).
-	if len(s) == 0 {
-		return {}, true
-	}
-	parts := strings.split(s, "|", context.temp_allocator)
-	defer delete(parts, context.temp_allocator)
+	// ranges_split matches the C++ split: "" yields zero parts (the
+	// empty flag set), where strings.split would yield one empty part.
+	parts := ranges_split(s, '|', context.temp_allocator)
+	defer delete(parts)
 	flags: F
 	for part in parts {
 		flag, ok := enum_from_name(descs, part)

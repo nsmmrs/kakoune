@@ -1631,9 +1631,14 @@ main_run_server :: proc(
 			&shell_ctx,
 			allocator,
 		); err != .None {
+			defer delete(msg, allocator)
+			// kill_session unwinds the server with its status (C++
+			// main-loop catch); it is not an error.
+			if err == .Kill_Session {
+				return commands_kill_status
+			}
 			startup_error = true
 			debug_write_to_debug_buffer(fmt.tprintf("error while parsing kakrc:\n    {}", msg))
-			delete(msg, allocator)
 		}
 	}
 
@@ -1652,9 +1657,6 @@ main_run_server :: proc(
 		context_init_empty(&init_ctx, allocator)
 		defer context_destroy(&init_ctx)
 		shell_ctx := Shell_Context{}
-		// NOTE: the C++ also propagates kill_session's exit status here;
-		// the Odin command manager has no kill channel yet, so every
-		// failure is reported as a startup error.
 		if err, msg := command_manager_execute(
 			command_manager_instance(),
 			server_init,
@@ -1662,9 +1664,14 @@ main_run_server :: proc(
 			&shell_ctx,
 			allocator,
 		); err != .None {
+			defer delete(msg, allocator)
+			// kill_session unwinds the server with its status (C++
+			// main-loop catch); it is not an error.
+			if err == .Kill_Session {
+				return commands_kill_status
+			}
 			startup_error = true
 			debug_write_to_debug_buffer(fmt.tprintf("error while running server init commands:\n    {}", msg))
-			delete(msg, allocator)
 		}
 	}
 
