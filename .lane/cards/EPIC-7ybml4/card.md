@@ -1,7 +1,7 @@
 ---
 id: EPIC-7ybml4
 title: "Plan wave 2 (buffer engine, regex, selectors)"
-status: doing
+status: done
 type: epic
 priority: 3
 deps:
@@ -15,8 +15,9 @@ deps:
 - TASK-91m93w
 - TASK-xc4dp4
 created: "2026-10-03T09:36:13.191742Z"
-updated: "2026-10-03T09:54:32.714840Z"
+updated: "2026-10-03T09:55:17.300931Z"
 ---
+
 
 
 
