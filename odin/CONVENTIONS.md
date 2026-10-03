@@ -6,11 +6,11 @@ split. Read this before writing any `.odin` file here.
 ## Naming
 
 - Every file starts with a `package kak` clause.
-- Prefix EVERY top-level proc, type, and constant with `<module>_`:
-  `utf8_distance`, `json_parse`, `Json_Value`. One package means no two
-  modules may claim the same bare name.
-- Types: `Module_thing` (e.g. `Json_Value`, `Keys_Key`). Enums: zero value
-  is the ok/empty case.
+- Every top-level name must contain the module name (case-insensitive):
+  `<module>_*` for procs (e.g. `utf8_distance`), `<Module>_*` types (e.g.
+  `Json_Value`, `Ranked_Match`), `<module>_test_*` or `test_<module>_*`
+  for tests. One package means no two modules may claim the same bare name.
+- Enums: zero value is the ok/empty case.
 
 ## Types
 
