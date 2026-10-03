@@ -2892,50 +2892,6 @@ normal_paste_pos :: proc(buffer: ^Buffer, min, max: Coord_Buffer, mode: Paste_Mo
 	panic("STUB: normal_paste_pos")
 }
 
-insert_completer_make :: proc(ctx: ^Context) -> Insert_Completer {
-	panic("STUB: insert_completer_make")
-}
-
-insert_completer_destroy :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_destroy")
-}
-
-insert_completer_update :: proc(completer: ^Insert_Completer, allow_implicit: bool) {
-	panic("STUB: insert_completer_update")
-}
-
-insert_completer_try_accept :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_try_accept")
-}
-
-insert_completer_reset :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_reset")
-}
-
-insert_completer_select :: proc(completer: ^Insert_Completer, index: int, relative: bool, record: input_handler_Record_Key_Apply, record_ctx: rawptr) {
-	panic("STUB: insert_completer_select")
-}
-
-insert_completer_explicit_file_complete :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_explicit_file_complete")
-}
-
-insert_completer_explicit_word_buffer_complete :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_explicit_word_buffer_complete")
-}
-
-insert_completer_explicit_word_all_complete :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_explicit_word_all_complete")
-}
-
-insert_completer_explicit_line_buffer_complete :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_explicit_line_buffer_complete")
-}
-
-insert_completer_explicit_line_all_complete :: proc(completer: ^Insert_Completer) {
-	panic("STUB: insert_completer_explicit_line_all_complete")
-}
-
 command_parser_make :: proc(str: string) -> Command_Parser {
 	panic("STUB: command_parser_make")
 }
