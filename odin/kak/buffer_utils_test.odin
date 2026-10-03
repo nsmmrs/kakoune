@@ -841,6 +841,12 @@ buffer_utils_test_fifo_phase :: proc(
 
 @(test)
 buffer_utils_test_fifo :: proc(t: ^testing.T) {
+	// The registry is a process-lifetime singleton; drop its backing
+	// here so per-test tracking sees no leftover.
+	defer {
+		delete(buffer_utils_fifo_owners)
+		buffer_utils_fifo_owners = nil
+	}
 	b := buffer_utils_test_make_buffer({"\n"}, {.No_Hooks}, "fifo-manual")
 	defer buffer_destroy(b)
 	// Not_Initially with trailing newlines: the initial empty line

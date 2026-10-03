@@ -1165,6 +1165,12 @@ highlighters_test_replace_ranges :: proc(t: ^testing.T) {
 
 @(test)
 highlighters_test_reference :: proc(t: ^testing.T) {
+	// The recursion guard is a process-global stack; drop its backing
+	// here so per-test tracking sees no leftover.
+	defer {
+		delete(Highlighters_Running_Refs)
+		Highlighters_Running_Refs = nil
+	}
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 	defer mem.tracking_allocator_destroy(&track)
@@ -1364,12 +1370,19 @@ highlighters_test_spec_updates :: proc(t: ^testing.T) {
 	// Range specs shift with edits.
 	range_specs := Range_And_String_List{prefix = uint(buffer_timestamp(s.buffer))}
 	range_specs.list = make([dynamic]Range_And_String, alloc)
-	defer delete(range_specs.list)
+	defer {
+		// Every element owns its spec string (the literal below is
+		// cloned, parsed additions arrive owned), so free each.
+		for e in range_specs.list {
+			option_manager_range_spec_free(e, alloc)
+		}
+		delete(range_specs.list)
+	}
 	append(
 		&range_specs.list,
 		Range_And_String{
 			range = Inclusive_Buffer_Range{first = Coord_Buffer{0, 0}, last = Coord_Buffer{0, 0}},
-			spec = "red",
+			spec = strings.clone("red", alloc),
 		},
 	)
 	_, _ = buffer_insert(s.buffer, Coord_Buffer{0, 0}, "top\n")

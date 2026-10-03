@@ -50,6 +50,16 @@ json_ui_test_reset :: proc() {
 	clear(&json_ui_test_pastes)
 }
 
+// json_ui_test_teardown clears the recorders and releases their backing
+// stores so per-test tracking sees no leftover; call with the mutex held.
+json_ui_test_teardown :: proc() {
+	json_ui_test_reset()
+	delete(json_ui_test_keys)
+	delete(json_ui_test_pastes)
+	json_ui_test_keys = nil
+	json_ui_test_pastes = nil
+}
+
 // json_ui_test_eval_ui builds a callback-wired UI for eval tests.
 json_ui_test_eval_ui :: proc() -> Json_Ui {
 	return Json_Ui{
@@ -290,7 +300,7 @@ json_ui_test_eval_keys :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	ui := json_ui_test_eval_ui()
 	err := json_ui_test_eval(t, &ui, `{"jsonrpc": "2.0", "method": "keys", "params": ["xy", "<ret>"]}`)
 	testing.expect_value(t, err, Json_Ui_Error.None)
@@ -318,7 +328,7 @@ json_ui_test_eval_paste :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	ui := json_ui_test_eval_ui()
 	// Note "anb": the JSON port does not interpret escapes (like
 	// the C++), so "\n" parses to "n".
@@ -354,7 +364,7 @@ json_ui_test_eval_mouse :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	ui := json_ui_test_eval_ui()
 	testing.expect_value(
 		t,
@@ -417,7 +427,7 @@ json_ui_test_eval_scroll_menu_resize :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	ui := json_ui_test_eval_ui()
 	testing.expect_value(
 		t,
@@ -473,7 +483,7 @@ json_ui_test_eval_envelope :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	ui := json_ui_test_eval_ui()
 	testing.expect_value(t, json_ui_test_eval(t, &ui, `[1, 2]`), Json_Ui_Error.Not_An_Object)
 	testing.expect_value(
@@ -521,7 +531,7 @@ json_ui_test_consume :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	ui := json_ui_test_eval_ui()
 	// Nothing runs without a key callback; input is retained.
 	unwired := Json_Ui{allocator = context.allocator, requests = strings.clone(" ", context.allocator)}
@@ -565,7 +575,7 @@ json_ui_test_consume_salvage :: proc(t: ^testing.T) {
 	}
 	defer sync.mutex_unlock(&json_ui_test_mutex)
 	json_ui_test_reset()
-	defer json_ui_test_reset()
+	defer json_ui_test_teardown()
 	// A bad line is dropped (with one stderr line) and the good
 	// request after it still runs.
 	ui := json_ui_test_eval_ui()
