@@ -51,3 +51,29 @@ split. Read this before writing any `.odin` file here.
 
 - Create ONLY your assigned files. Never modify another module's files,
   never touch `.lane/`, never commit. The coordinator integrates.
+- `knot.odin` is coordinator-owned shared vocabulary (all
+  mutually-referential structs/enums/callbacks). Agents read it, never
+  write it. Missing a field or type? Report it; the coordinator amends
+  and you re-copy the file into your worktree.
+
+## STUB protocol (knot implementations, wave 5+)
+
+Implementation agents compile standalone, so a proc you CALL that lives in
+an unmerged module gets a stub in YOUR OWN file, next to your code:
+
+```odin
+option_manager_get :: proc(m: ^Option_Manager, name: string) -> ^Option {
+	panic("STUB: option_manager_get")
+}
+```
+
+Rules:
+
+- Body is exactly one line: `panic("STUB: <name>")`. Nothing else.
+- Signature comes from the C++ header (knot.odin has the types).
+- Never stub a proc from an already-merged module; never stub what you
+  implement yourself; never redeclare a knot.odin type.
+- The coordinator deletes your stub when the real proc merges (mechanical
+  grep for `panic("STUB:`). If your stub's signature disagrees with the
+  real proc, the later merge fails to compile in YOUR file and the
+  coordinator fixes your call sites (coordinator owns integration).
