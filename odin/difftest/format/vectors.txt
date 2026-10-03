@@ -1,0 +1,89 @@
+int	0
+int	42
+int	-42
+int	9223372036854775807
+int	-9223372036854775808
+int	-1
+uint	0
+uint	255
+uint	4294967295
+uint	4294967296
+uint	18446744073709551615
+hex	0
+hex	255
+hex	3735928559
+hex	18446744073709551615
+grouped	0
+grouped	999
+grouped	1000
+grouped	1234567
+grouped	123456789
+grouped	999999999999999999
+float	00000000
+float	80000000
+float	3fc00000
+float	c0200000
+float	3dcccccd
+float	7f800000
+float	ff800000
+float	7fc00000
+float	ffc00000
+float	4f2b0cd1
+float	00000001
+float	7f7fffff
+cp	0
+cp	65
+cp	127
+cp	128
+cp	2047
+cp	2048
+cp	55295
+cp	55296
+cp	57343
+cp	57344
+cp	65535
+cp	65536
+cp	1114111
+cp	1114112
+cp	2147483647
+format	Hello, {}!	World
+format	{}+{}	1
+format	{1} {0}	b	a
+format	{:5}	ab
+format	{:05}	42
+format	{0:2}	abc
+format	\{}	x
+format	{	x
+format	{0}
+format	{-1}	x
+format	{x}	a
+format	{}	
+format	{0:}	a
+format	{0:0}	a
+format	{0:00}	x
+format	{0:-3}	abcdef
+format	100%	x
+format	
+format	}
+format	a{0}b{1}c{0}d	x	y
+format	{1}{}	a	b	c
+format	{:4}	\xc3\xa9
+format	{:3}	\xe4\xb8\xad
+format	{:2}	\xcc\x81
+format	{0:5}	\xe4\xb8\xad\xe4\xb8\xad
+format	{4294967296}	z
+format	{4294967297}	a	b
+format	a\x00b	
+format	<{0}>	
+format	a\x5cb	
+format_to	100	Hello, {}!	World
+format_to	0		x
+format_to	1		
+format_to	5	abcd	
+format_to	4	abcd	
+format_to	6	{}-{}	a	b
+format_to	3	{}-{}	a	b
+format_to	10	{9}	a
+format_to	-5	hi	
+echo	
+echo	\x00\xff\xc3\xa9

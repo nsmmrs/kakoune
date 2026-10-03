@@ -42,6 +42,91 @@ Harness bugs found and fixed during bring-up (not port bugs):
   legitimately contains raw >=0x80 bytes (to_json only escapes \, \",
   <=0x1F); now decoded with the injective backslashreplace transform.
 
+Difftest findings, wave 2 (2026-10-03, agent wave3-difftest2)
+============================================================
+Base commit: da31bb74 (Wave 2 closeout + lane board (wave 3))
+Toolchain: g++ 16.2.1, odin dev-2026-09:a2fb372b7, python 3.14.7
+C++ locale for ranked_match/format/utf8: en_US.utf8 (harnesses pin
+LC_ALL, stderr-verified)
+`odin run` vs built-binary equivalence: verified for all 7 modules
+(--smoke-odin-run)
+
+Modules covered: 7 (round-1 four + format, ranges, utf8)
+New seeds: 89 format + 97 ranges + 143 utf8 (ranges split seeds mined
+from the C++ UnitTest in src/ranges.cc; format/utf8 have no C++
+UnitTests, so seeds are hand-built edge cases).
+Full run (seed 20261003, count 20000): 145,523 vectors, 131
+mismatches, all in utf8 and all one root cause (see below).
+
+Coverage notes (seed 20261003 census):
+- format: 20089 vectors; int/uint/hex over edge + random 64-bit,
+  grouped over [0, 10^18), float over full u32 bits (2996 vectors),
+  cp over [0, INT32_MAX], format/format_to over placeholder soup
+  (implicit/explicit/negative/huge-wrapping indices, widths incl.
+  zero-pad/negative/empty/invalid, escapes, NUL bytes) with 0-3
+  params each. Outcome census: 19291 exact agreements, 586 float
+  semantic accepts (161 inf + 178 nan spellings, 247 draws of 3
+  known finite tie-break patterns, 0 new), 212 format_to
+  precedence accepts, 0 bad.
+- ranges: 20097 vectors; every op hit 500+ times (split family 6034
+  incl. sep==escaper; skip/drop capped at len; accumulate sums and
+  tiny products; for_n_best over distinct ints; static_gather N=1..4
+  exact/inexact over non-empty lists).
+- utf8: 20143 vectors; byte soup (valid + invalid UTF-8) over
+  read/cp/next/finish/previous/advance/distance/prevcp,
+  size_cp/dump over [0, INT32_MAX], width over the agreement pool +
+  ASCII + negatives + verified huge values, coldist/advcol over
+  pool-built strings. 131/20143 mismatch, every one charstart@len
+  (proven exhaustive by re-checking all outputs, not just the 10
+  shown).
+
+Verdicts:
+- format: PASS modulo two documented comparison adjustments (float
+  semantic compare; format_to either-true-error rule). Every C++
+  error class observed and mapped; no unmapped error occurred.
+- ranges: PASS. Bit-identical across all 19 ops incl. the split
+  escaper edge cases and for_n_best visit orders.
+- utf8: MISMATCH (1 systematic single-point deviation).
+  character_start(s, len(s)) on non-empty input: C++ returns len
+  (the loop reads *end(), NUL for std::string, so it stops at once),
+  Odin returns the last character's start. Repro:
+    printf 'charstart\\ta\\xc3\\xa9\\xe2\\x82\\xac\\t6\\n' | bin/utf8_cc   # 6
+    printf 'charstart\\ta\\xc3\\xa9\\xe2\\x82\\xac\\t6\\n' | bin/utf8_odin # 3
+  (Pass a literal TAB.) Note for the fixer: the C++ value depends on
+  the byte after end(), which is only NUL for basic_string-like
+  ranges — for a StringView it is an out-of-bounds read. All other
+  utf8 vectors (20012/20143) agree exactly.
+
+Exhaustive side probes (throwaway binaries, not committed):
+- float: 60018 f32 bit patterns (edges, subnormals, nan/inf, random)
+  through to_chars-general vs format_to_string_float. All finite
+  values agree except 3 last-digit ties (4f2b0cd1, 51907a15,
+  4e3bae0b), both spellings verified to round-trip; inf/nan differ
+  only in styling (inf/-inf/nan/-nan vs Inf/-Inf/NaN).
+- width: every codepoint 0..0x10FFFF through wcwidth-mapped C++
+  vs unicode_codepoint_width under en_US.utf8. 66015 differ (5.9%):
+  65377 wide-block-unassigned (1 vs 2), 440 + 1 zero-width/format
+  (0 vs 1), 196 emoji/pictographs (2 vs 1), 1 each (0 vs 2, 1 vs 0).
+  91 contiguous ranges; see README for the shape. Negatives and
+  spot-checked values above 0x10FFFF agree (1). The fuzz
+  agreement pool (27 codepoints, widths {0,1,2}) was verified
+  point-by-point against this probe.
+
+Harness/driver bugs found and fixed during bring-up (not port bugs):
+- format C++ printed raw e.what(), which embeds the fmt's
+  index/width field: a newline there broke the line protocol (extra
+  output line). Now escaped; the error mapping still applies.
+- a ranges seed (static_gather, empty input, N=1) segfaulted the C++
+  side: static_gather dereferences end() without checking on empty
+  ranges. Empty static_gather is excluded from fuzzing (documented
+  C++ UB, found by crashing).
+- grouped fuzz bound corrected to < 10^18 (19+ digits overrun the
+  C++ buffer; 16-18 digits fit exactly).
+- fuzz.py mixed salted hash() into per-module stream offsets, so
+  equal --seed runs generated different streams despite the README
+  claim. Replaced with a stable string offset; reproducibility
+  verified (two runs, identical mismatch counts).
+
 Machine run log follows (fuzz.py --results appends here):
 --------------------------------------------------------
 fuzz.py seed=20261003 count=20000 modules=hash,diff,ranked_match,json
@@ -65,3 +150,37 @@ diff: 20021 vectors (21 seeds), 0 mismatches
 ranked_match: 20053 vectors (53 seeds), 0 mismatches
 json: 20080 vectors (80 seeds), 0 mismatches
 RESULT: PASS
+fuzz.py seed=20261003 count=20000 modules=hash,diff,ranked_match,json,format,ranges,utf8
+hash: 25040 vectors (40 seeds), 0 mismatches
+diff: 20021 vectors (21 seeds), 0 mismatches
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+json: 20080 vectors (80 seeds), 0 mismatches
+format: 20089 vectors (89 seeds), 0 mismatches
+ranges: 20097 vectors (97 seeds), 0 mismatches
+utf8: 20143 vectors (143 seeds), 131 mismatches
+  vector #67 in='charstart\ta\\xc3\\xa9\\xe2\\x82\\xac\t6' c++='6' odin='3'
+  vector #402 in='charstart\t\\xc0\\xafLP\t4' c++='4' odin='3'
+  vector #438 in='charstart\t-km(\\xed\\xa0\\x80S\\x7f\t9' c++='9' odin='8'
+  vector #508 in='charstart\t1:_x\\xc0\\xaf\\xc3\\xa9v(\\x00.o8c:N\t17' c++='17' odin='16'
+  vector #671 in='charstart\t_\t1' c++='1' odin='0'
+  vector #951 in='charstart\t\\xc3\\x85\\xe4\\xb862h\\xc3\\x85b:lj\\xff/twflvGF(b2\t25' c++='25' odin='24'
+  vector #1022 in='charstart\tYST\t3' c++='3' odin='2'
+  vector #1105 in='charstart\tHJ:\\xc3\\xa9O\\x7f\t7' c++='7' odin='6'
+  vector #1448 in='charstart\t5T\t2' c++='2' odin='1'
+  vector #1468 in='charstart\t\\xf0\\x9f\\x99\\x82G\\x80\t6' c++='6' odin='4'
+RESULT: FAIL
+fuzz.py seed=777 count=20000 modules=format,ranges,utf8
+format: 20089 vectors (89 seeds), 0 mismatches
+ranges: 20097 vectors (97 seeds), 0 mismatches
+utf8: 20143 vectors (143 seeds), 131 mismatches
+  vector #67 in='charstart\ta\\xc3\\xa9\\xe2\\x82\\xac\t6' c++='6' odin='3'
+  vector #196 in='charstart\t/\t1' c++='1' odin='0'
+  vector #209 in='charstart\t_kPv3m4lt2\t10' c++='10' odin='9'
+  vector #413 in='charstart\t(Q-\\xc3\\x9fZ\t6' c++='6' odin='5'
+  vector #597 in='charstart\to\t1' c++='1' odin='0'
+  vector #648 in='charstart\t\\xf0\\x9f\\x99\t3' c++='3' odin='0'
+  vector #898 in='charstart\tU_C6gYJ_enCn\\x0a\\xc3\\xa97ij\\x0a1B\\xc3V5\\xc3\\xf0\\x9f\\x99\\x82ea\t31' c++='31' odin='30'
+  vector #1136 in='charstart\tQX(\\xc3\\xbc-I\t7' c++='7' odin='6'
+  vector #1785 in='charstart\t\\xc3\\x85\t2' c++='2' odin='0'
+  vector #1925 in='charstart\tfU-UMkAdR\\x09\\xc3G\t12' c++='12' odin='11'
+RESULT: FAIL

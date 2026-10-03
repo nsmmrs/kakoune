@@ -1,0 +1,97 @@
+split	a,b,c	44
+split	,b,c	44
+split	,b,	44
+split	,	44
+split		44
+split	abc	44
+split	,,,	44
+split	a:b:c	58
+split_after	a,b,c,	44
+split_after	a,b,c	44
+split_after		44
+split_after	abc	44
+split_esc	a\x5c,,\x5c,b,\x5c,	44	92
+split_esc	\x5c,\x5c,	44	92
+split_esc	\x5c\x5c,\x5c\x5c,	44	92
+split_esc	a,b,c	44	92
+split_esc	\x5c	44	92
+split_esc	,	44	44
+split_esc	a,a,a	97	97
+reverse	
+reverse	a
+reverse	abcba
+reverse	hello
+reverse	\x00\xff\x01
+skip	hello	0
+skip	hello	5
+skip	hello	2
+skip		0
+drop	hello	0
+drop	hello	5
+drop	hello	2
+drop		0
+filter	Hello, World!	0
+filter	Hello, World!	1
+filter	\x00\xff\xc3\xa9	2
+filter		0
+transform	ABC	0
+transform	\xff\x00	0
+transform	ABC	1
+transform		1
+enum	
+enum	A
+enum	\x00\xff
+find	hello	108
+find	hello	122
+find		65
+contains	hello	108
+contains	hello	122
+contains		65
+all_of	abc	1
+all_of	abC	1
+all_of		1
+any_of	ABC	1
+any_of	ABC	0
+any_of		0
+remove_if	Hello, World!	1
+remove_if	aabbcc	0
+remove_if		2
+accumulate	1,2,3,4	0	0
+accumulate	1,2,3,4	10	0
+accumulate		5	0
+accumulate	-1,2,-3	0	0
+accumulate	2,3,4	1	1
+accumulate	2,3,4	0	1
+accumulate		7	1
+accumulate	-2,3	1	1
+for_n_best	3,1,2	2	0
+for_n_best	3,1,2	5	0
+for_n_best	3,1,2	0	0
+for_n_best		3	0
+for_n_best	5,4,3,2,1	2	1
+for_n_best	-3,-1,-2	2	2
+for_n_best	7	1	0
+static_gather	1,2	2	1
+static_gather	1,2,3	2	1
+static_gather	1	2	1
+static_gather	1,2	2	0
+static_gather	1,2,3	2	0
+static_gather	1	2	0
+static_gather	5	1	1
+static_gather	9	1	0
+static_gather	1,2,3,4	4	1
+static_gather	1,2,3	4	0
+static_gather	1,2,3,4,5	4	0
+unerase	hello	108
+unerase	hello	122
+unerase	a	97
+unerase		65
+flatten
+flatten	
+flatten	a	bc		def
+flatten	\x00	\xff
+concat	a	b
+concat		
+concat	hello	
+find	\x00\x01\x00	0
+split	\x00,\x00	44

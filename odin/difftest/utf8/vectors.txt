@@ -1,0 +1,143 @@
+is_start	0
+is_start	65
+is_start	127
+is_start	128
+is_start	191
+is_start	192
+is_start	223
+is_start	224
+is_start	239
+is_start	240
+is_start	247
+is_start	248
+is_start	255
+read	a\xc3\xa9\xe2\x82\xac	0
+read	a\xc3\xa9\xe2\x82\xac	1
+read	a\xc3\xa9\xe2\x82\xac	2
+read	a\xc3\xa9\xe2\x82\xac	3
+read	a\xc3\xa9\xe2\x82\xac	4
+read	a\xc3\xa9\xe2\x82\xac	6
+read		0
+read	\xc3	0
+read	\xe2\x82	0
+read	\xf0\x9f	0
+read	\x80	0
+read	\xff	0
+read	\xf8	0
+cp	a\xc3\xa9\xe2\x82\xac	1
+cp	a\xc3\xa9\xe2\x82\xac	6
+cp		0
+cp	\xc3	0
+cp	\xf0\x9f\x98\x82	0
+size_byte	0
+size_byte	127
+size_byte	128
+size_byte	191
+size_byte	192
+size_byte	223
+size_byte	224
+size_byte	239
+size_byte	240
+size_byte	247
+size_byte	248
+size_byte	255
+size_cp	0
+size_cp	127
+size_cp	128
+size_cp	2047
+size_cp	2048
+size_cp	65535
+size_cp	65536
+size_cp	1114111
+size_cp	1114112
+size_cp	2097151
+size_cp	2147483647
+next	a\xc3\xa9\xe2\x82\xac	0
+next	a\xc3\xa9\xe2\x82\xac	2
+next	a\xc3\xa9\xe2\x82\xac	6
+next		0
+finish	a\xc3\xa9\xe2\x82\xac	0
+finish	a\xc3\xa9\xe2\x82\xac	2
+finish	a\xc3\xa9\xe2\x82\xac	6
+previous	a\xc3\xa9\xe2\x82\xac	0
+previous	a\xc3\xa9\xe2\x82\xac	2
+previous	a\xc3\xa9\xe2\x82\xac	6
+charstart	a\xc3\xa9\xe2\x82\xac	0
+charstart	a\xc3\xa9\xe2\x82\xac	2
+charstart	a\xc3\xa9\xe2\x82\xac	5
+charstart	a\xc3\xa9\xe2\x82\xac	6
+charstart		0
+advance	a\xc3\xa9\xe2\x82\xac	0	0
+advance	a\xc3\xa9\xe2\x82\xac	0	1
+advance	a\xc3\xa9\xe2\x82\xac	0	3
+advance	a\xc3\xa9\xe2\x82\xac	0	9
+advance	a\xc3\xa9\xe2\x82\xac	6	-1
+advance	a\xc3\xa9\xe2\x82\xac	3	-1
+advance	a\xc3\xa9\xe2\x82\xac	3	-2
+advance	a\xc3\xa9\xe2\x82\xac	5	-1
+advance	a\xc3\xa9\xe2\x82\xac	1	-1
+advance	a\xc3\xa9\xe2\x82\xac	2	-1
+advance		0	5
+advance	a\xc3\xa9\xe2\x82\xac	6	3
+distance	
+distance	a\xc3\xa9\xe2\x82\xac
+distance	\x80\x80
+distance	abc
+prevcp	a\xc3\xa9\xe2\x82\xac	0
+prevcp	a\xc3\xa9\xe2\x82\xac	1
+prevcp	a\xc3\xa9\xe2\x82\xac	2
+prevcp	a\xc3\xa9\xe2\x82\xac	3
+prevcp	a\xc3\xa9\xe2\x82\xac	4
+prevcp	a\xc3\xa9\xe2\x82\xac	6
+prevcp		0
+prevcp	\xc3X	1
+dump	0
+dump	65
+dump	127
+dump	128
+dump	2047
+dump	2048
+dump	65535
+dump	65536
+dump	1114111
+dump	1114112
+dump	2147483647
+dump	55296
+width	0
+width	65
+width	127
+width	233
+width	937
+width	20013
+width	128578
+width	769
+width	12354
+width	54620
+width	65313
+width	8364
+width	1575
+width	8721
+width	8203
+width	-1
+width	-61
+width	1114112
+width	2147483647
+width	8320
+coldist	
+coldist	abc
+coldist	a\xc3\xa9\xe2\x82\xac
+coldist	\xe4\xb8\xad\xe4\xb8\xad
+coldist	a\xcc\x81
+coldist	\xf0\x9f\x99\x82
+advcol	abc	0	2
+advcol	abc	0	9
+advcol	abc	3	5
+advcol	a\xe4\xb8\xadb	0	1
+advcol	a\xe4\xb8\xadb	0	2
+advcol	a\xe4\xb8\xadb	0	3
+advcol	a\xe4\xb8\xadb	4	-1
+advcol	a\xe4\xb8\xadb	4	-2
+advcol	a\xe4\xb8\xadb	1	-1
+advcol	a\xe4\xb8\xadb	5	2
+echo	
+echo	\xff\x80\xc3
