@@ -1337,7 +1337,7 @@ main_make_dummy_ui :: proc(allocator := context.allocator) -> ^User_Interface {
 main_make_ui :: proc(ui_type: Main_UI_Type, allocator := context.allocator) -> ^User_Interface {
 	switch ui_type {
 	case .Terminal:
-		return terminal_ui_make(allocator)
+		return terminal_ui_make_ui(allocator)
 	case .Json:
 		return json_ui_make(allocator)
 	case .Dummy:
@@ -1350,7 +1350,7 @@ main_make_ui :: proc(ui_type: Main_UI_Type, allocator := context.allocator) -> ^
 main_destroy_ui :: proc(ui: ^User_Interface, ui_type: Main_UI_Type, allocator := context.allocator) {
 	switch ui_type {
 	case .Terminal:
-		terminal_ui_destroy(ui)
+		terminal_ui_destroy_ui(ui, allocator)
 	case .Json:
 		json_ui_destroy(ui)
 	case .Dummy:
@@ -1383,7 +1383,7 @@ main_show_startup_info :: proc(client: ^Client, last_version: int) {
 			)
 		}
 		lines := strings.split(note.notes, "\n", alloc)
-		defer delete(lines)
+		defer delete(lines, alloc)
 		for line in lines {
 			if len(line) == 0 {
 				continue
@@ -2079,18 +2079,6 @@ main_entry :: proc(argv: []string, allocator := context.allocator) -> int {
 
 // --- Stubs: called-but-unmerged procs (STUB protocol; coordinator deletes
 // these when the real procs merge) ---
-
-terminal_ui_make :: proc(allocator := context.allocator) -> ^User_Interface {
-	panic("STUB: terminal_ui_make")
-}
-
-terminal_ui_destroy :: proc(ui: ^User_Interface) {
-	panic("STUB: terminal_ui_destroy")
-}
-
-terminal_ui_restore_terminal :: proc() {
-	panic("STUB: terminal_ui_restore_terminal")
-}
 
 json_ui_make :: proc(allocator := context.allocator) -> ^User_Interface {
 	panic("STUB: json_ui_make")

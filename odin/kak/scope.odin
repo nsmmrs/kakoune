@@ -228,6 +228,12 @@ scope_global_singleton: ^Global_Scope
 scope_global_refcount: int
 scope_global_mutex: sync.Mutex
 
+// NOTE: `odin test` runs multithreaded with per-thread tracking
+// allocators, so tests that init/deinit this process-wide singleton can
+// emit flaky leak/bad-free warnings when its lifecycle spans worker
+// threads. The lifecycle itself is correct (mutex + refcount); verify
+// memory cleanliness single-threaded:
+// odin test ./odin/kak -define:ODIN_TEST_THREADS=1
 // scope_global_init creates (or returns) the process-wide global scope,
 // holding one reference for the caller.
 scope_global_init :: proc(allocator := context.allocator) -> ^Global_Scope {
