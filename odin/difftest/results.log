@@ -256,3 +256,17 @@ parameters_parser: 20034 vectors (34 seeds), 0 mismatches
 ranked_match: 20053 vectors (53 seeds), 0 mismatches
 utf8: 20143 vectors (143 seeds), 0 mismatches
 RESULT: PASS
+fuzz.py seed=7 count=20000 modules=hash,diff,ranked_match,json,format,ranges,utf8,regex,regex_vm,faces,keymap_manager,parameters_parser
+hash: 25040 vectors (40 seeds), 0 mismatches
+diff: 20021 vectors (21 seeds), 0 mismatches
+ranked_match: 20053 vectors (53 seeds), 0 mismatches
+json: 20080 vectors (80 seeds), 0 mismatches
+format: 20089 vectors (89 seeds), 0 mismatches
+ranges: 20097 vectors (97 seeds), 0 mismatches
+utf8: 20143 vectors (143 seeds), 0 mismatches
+regex: 20174 vectors (174 seeds), 0 mismatches
+regex_vm: 20100 vectors (100 seeds), 0 mismatches
+faces: 20100 vectors (100 seeds), 0 mismatches
+keymap_manager: 20036 vectors (36 seeds), 0 mismatches
+parameters_parser: 20034 vectors (34 seeds), 0 mismatches
+RESULT: PASS
