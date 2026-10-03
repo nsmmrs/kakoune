@@ -1302,52 +1302,6 @@ scoped_selection_edition_destroy :: proc(e: ^Scoped_Selection_Edition) {
 	panic("STUB: scoped_selection_edition_destroy")
 }
 
-input_handler_init :: proc(
-	h: ^Input_Handler,
-	selections: Selection_List,
-	flags: Context_Flags,
-	name: string,
-	allocator := context.allocator,
-) {
-	panic("STUB: input_handler_init")
-}
-
-input_handler_destroy :: proc(h: ^Input_Handler) {
-	panic("STUB: input_handler_destroy")
-}
-
-input_handler_context :: proc(h: ^Input_Handler) -> ^Context {
-	panic("STUB: input_handler_context")
-}
-
-input_handler_handle_key :: proc(h: ^Input_Handler, key: Keys_Key, synthesized := true) {
-	panic("STUB: input_handler_handle_key")
-}
-
-input_handler_on_next_key :: proc(h: ^Input_Handler, mode_name: string, mode: Keymap_Manager_Mode, callback: Key_Callback) {
-	panic("STUB: input_handler_on_next_key")
-}
-
-input_handler_reset_normal_mode :: proc(h: ^Input_Handler) {
-	panic("STUB: input_handler_reset_normal_mode")
-}
-
-input_handler_mode_info :: proc(h: ^Input_Handler, allocator := context.allocator) -> Mode_Info {
-	panic("STUB: input_handler_mode_info")
-}
-
-input_handler_is_recording :: proc(h: ^Input_Handler) -> bool {
-	panic("STUB: input_handler_is_recording")
-}
-
-input_handler_recording_reg :: proc(h: ^Input_Handler) -> rune {
-	panic("STUB: input_handler_recording_reg")
-}
-
-input_handler_paste :: proc(h: ^Input_Handler, content: string) {
-	panic("STUB: input_handler_paste")
-}
-
 option_manager_get :: proc(m: ^Option_Manager, name: string) -> ^Option {
 	panic("STUB: option_manager_get")
 }

@@ -754,6 +754,14 @@ Key_Callback :: struct {
 	destroy: proc(data: rawptr, allocator: mem.Allocator),
 }
 
+// Input_Handler_Idle_Callback is the on_next_key idle callback
+// (C++ Function<void (Timer&)>): fired when no key arrives in time.
+Input_Handler_Idle_Callback :: struct {
+	call:    proc(data: rawptr, timer: ^Event_Manager_Timer),
+	data:    rawptr,
+	destroy: proc(data: rawptr, allocator: mem.Allocator),
+}
+
 // Prompt_Completer is C++ PromptCompleter.
 Prompt_Completer :: struct {
 	call:    proc(data: rawptr, ctx: ^Context, text: string, cursor_pos: Units_ByteCount, allocator: mem.Allocator) -> Completions,

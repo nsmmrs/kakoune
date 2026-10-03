@@ -1547,10 +1547,6 @@ option_desc_string :: proc(o: ^Option, allocator := context.allocator) -> string
 	panic("STUB: option_desc_string")
 }
 
-input_handler_make :: proc(selections: Selection_List, flags: Context_Flags, name: string, allocator := context.allocator) -> ^Input_Handler {
-	panic("STUB: input_handler_make")
-}
-
 buffer_manager_get_buffer_ifp :: proc(name: string) -> ^Buffer {
 	panic("STUB: buffer_manager_get_buffer_ifp")
 }
