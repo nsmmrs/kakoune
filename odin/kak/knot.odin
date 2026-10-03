@@ -606,13 +606,14 @@ Context_Flags_Flag :: enum {
 }
 Context_Flags :: bit_set[Context_Flags_Flag; u8]
 
-// Context_Selection_History_Node is one selection undo-tree node.
+// Context_Selection_History_Node is C++ SelectionHistory::HistoryNode:
+// an owned SelectionList (which borrows its buffer) plus tree links.
+// The list carries selections, main index, buffer and timestamp, so no
+// side table is needed (earlier revisions kept a KNOTFIX buffer map).
 Context_Selection_History_Node :: struct {
-	selections: [dynamic]Selection,
-	main:       int,
+	list:       Selection_List,
 	parent:     int,
 	redo_child: int,
-	timestamp:  int,
 }
 
 // Context_Selection_History is C++ Context::SelectionHistory.

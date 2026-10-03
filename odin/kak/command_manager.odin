@@ -545,7 +545,14 @@ command_manager_expand_token_single :: proc(
 		}
 		return out, .None, ""
 	case .Register_Expand:
-		out := strings.clone(context_main_sel_register_value(ctx, content), allocator)
+		reg_val, reg_err := context_main_sel_register_value(ctx, content)
+		if reg_err != .None {
+			parts := [3]string{"no such register: '", content, "'"}
+			msg := strings.concatenate(parts[:], allocator)
+			delete(content, allocator)
+			return "", .Error, msg
+		}
+		out := strings.clone(reg_val, allocator)
 		delete(content, allocator)
 		return out, .None, ""
 	case .Option_Expand:
@@ -1595,10 +1602,6 @@ completion_complete_strings :: proc(query: string, cursor_pos: Units_ByteCount, 
 }
 
 // C++ Context::aliases (context.hh).
-context_aliases :: proc(ctx: ^Context) -> ^Alias_Registry {
-	panic("STUB: context_aliases")
-}
-
 // C++ AliasRegistry::operator[] (alias_registry.hh). Borrowed result, ""
 // when the alias is undefined.
 // C++ AliasRegistry::aliases_for (alias_registry.hh). Borrowed names in
@@ -1611,10 +1614,6 @@ alias_registry_flatten_alias_names :: proc(reg: ^Alias_Registry, allocator := co
 
 // C++ Context::hooks (context.hh).
 // C++ Context::main_sel_register_value (context.hh). Borrowed result.
-context_main_sel_register_value :: proc(ctx: ^Context, reg: string) -> string {
-	panic("STUB: context_main_sel_register_value")
-}
-
 // C++ Option::get_as_string (option_manager.hh). Owned result.
 option_get_as_string :: proc(opt: ^Option, quoting: Option_types_Quoting, allocator := context.allocator) -> string {
 	panic("STUB: option_get_as_string")
@@ -1678,6 +1677,3 @@ context_make_empty :: proc(allocator := context.allocator) -> Context {
 	panic("STUB: context_make_empty")
 }
 
-context_destroy :: proc(ctx: ^Context) {
-	panic("STUB: context_destroy")
-}

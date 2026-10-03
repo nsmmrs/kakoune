@@ -964,7 +964,7 @@ input_handler_normal_mode_info :: proc(data: rawptr, allocator: mem.Allocator) -
 	hidden_count := 0
 	if ctx.window != nil {
 		for &sel in sels.selections {
-			if window_display_coord(ctx.window, sel.cursor.coord) == nil {
+			if _, ok := window_display_coord(ctx.window, sel.cursor.coord); !ok {
 				hidden_count += 1
 			}
 		}
@@ -1305,7 +1305,26 @@ input_handler_prompt_register_call :: proc(data: rawptr, key_: Keys_Key, ctx: ^C
 		input_handler_line_editor_insert(&p.line_editor, string_utils_join_str(quoted_values[:], " ", context.temp_allocator))
 	} else {
 		reg_str := format_to_string_codepoint(cp, context.temp_allocator)
-		input_handler_line_editor_insert(&p.line_editor, quoter(context_main_sel_register_value(ctx, reg_str), context.temp_allocator))
+		reg_val, reg_err := context_main_sel_register_value(ctx, reg_str)
+		if reg_err == .None {
+			input_handler_line_editor_insert(&p.line_editor, quoter(reg_val, context.temp_allocator))
+		} else if context_has_client(ctx) {
+			// C++ throws to the key-handling boundary, which reports the
+			// failure; here the status line is updated directly. The text
+			// is borrowed by the stored line (client convention).
+			c := context_client(ctx)
+			faces := context_faces(ctx)
+			err_face, face_err := face_registry_lookup(faces, "Error", c.allocator)
+			assert(face_err == .None)
+			msg_parts := [3]string{"no such register: '", reg_str, "'"}
+			err_line := display_buffer_line_make_text(
+				strings.concatenate(msg_parts[:], c.allocator),
+				err_face,
+				c.allocator,
+			)
+			context_print_status_simple(ctx, err_line)
+			return
+		}
 	}
 	input_handler_prompt_display(p)
 	p.line_changed = true
@@ -2841,18 +2860,6 @@ input_handler_scroll_window :: proc(ctx: ^Context, offset: Units_LineCount, on_h
 // coordinator deletes each stub when the real proc merges).
 // ---------------------------------------------------------------------------
 
-context_init :: proc(ctx: ^Context, handler: ^Input_Handler, selections: Selection_List, flags: Context_Flags, name: string, allocator := context.allocator) {
-	panic("STUB: context_init")
-}
-
-context_keymaps :: proc(ctx: ^Context) -> ^Keymap_Manager {
-	panic("STUB: context_keymaps")
-}
-
-context_print_status_simple :: proc(ctx: ^Context, content: Display_Line) {
-	panic("STUB: context_print_status_simple")
-}
-
 scoped_edition_make :: proc(ctx: ^Context) -> Scoped_Edition {
 	panic("STUB: scoped_edition_make")
 }
@@ -2875,14 +2882,6 @@ buffer_iterator_value :: proc(it: Buffer_Iterator) -> rune {
 
 selection_list_make_multi :: proc(buffer: ^Buffer, sels: [dynamic]Selection, allocator := context.allocator) -> Selection_List {
 	panic("STUB: selection_list_make_multi")
-}
-
-window_buffer_coord :: proc(window: ^Window, coord: Coord_Display) -> (Coord_Buffer, bool) {
-	panic("STUB: window_buffer_coord")
-}
-
-window_set_position :: proc(window: ^Window, pos: Coord_Display) {
-	panic("STUB: window_set_position")
 }
 
 normal_get_command :: proc(key: Keys_Key) -> (Normal_Cmd, bool) {

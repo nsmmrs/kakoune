@@ -416,7 +416,7 @@ hook_manager_run_hook :: proc(m: ^Hook_Manager, hook: Hook, param: string, ctx: 
 		defer delete(atoms)
 		append(&atoms, Display_Atom{face = face, type = .Text, text = text})
 		line := Display_Line{atoms = atoms}
-		context_print_status(ctx, Display_Line{}, line, Units_ColumnCount(-1), .Status)
+		context_print_status(ctx, Display_Line{}, line, Units_ColumnCount(-1), User_Interface_Status_Style.Status)
 	}
 }
 

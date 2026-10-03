@@ -86,12 +86,12 @@ client_manager_clear :: proc(m: ^Client_Manager, disconnect_clients: bool) {
 		)
 	}
 	for i := 0; i < len(m.free_windows); i += 1 {
-		window_destroy(m.free_windows[i].window, m.allocator)
+		window_destroy(m.free_windows[i].window)
 		selection_list_destroy(&m.free_windows[i].selections)
 	}
 	clear(&m.free_windows)
 	for w in m.window_trash {
-		window_destroy(w, m.allocator)
+		window_destroy(w)
 	}
 	clear(&m.window_trash)
 }
@@ -183,7 +183,7 @@ client_manager_create_client :: proc(
 			info_face,
 			m.allocator,
 		)
-		context_print_status(ctx, Display_Line{}, line, Units_ColumnCount(-1), .Status)
+		context_print_status_simple(ctx, line)
 	}
 
 	if coord, ok := init_coord.?; ok {
@@ -208,10 +208,11 @@ client_manager_create_client :: proc(
 		err_faces := context_faces(ctx)
 		err_face, err_face_err := face_registry_lookup(err_faces, "Error", m.allocator)
 		assert(err_face_err == .None)
+		// NOTE: exec_msg is borrowed by the stored status line (client
+		// convention: status text is never freed), so it is not deleted.
 		err_line := display_buffer_line_make_text(exec_msg, err_face, m.allocator)
-		context_print_status(ctx, Display_Line{}, err_line, Units_ColumnCount(-1), .Status)
+		context_print_status_simple(ctx, err_line)
 		hook_manager_run_hook(hooks, .Runtime_Error, exec_msg, ctx)
-		delete(exec_msg, m.allocator)
 	}
 
 	for existing in m.clients {
@@ -394,7 +395,7 @@ client_manager_ensure_no_client_uses_buffer :: proc(m: ^Client_Manager, buf: ^Bu
 // unless the trash is empty.
 client_manager_clear_window_trash :: proc(m: ^Client_Manager) {
 	for w in m.window_trash {
-		window_destroy(w, m.allocator)
+		window_destroy(w)
 	}
 	clear(&m.window_trash)
 }
@@ -470,29 +471,5 @@ client_manager_complete_client_name :: proc(
 // Shared stubs: context_hooks and hook_manager_run_hook are also used by
 // register_manager.odin (register modified hooks). They live here, in
 // the alphabetically-first needing module, so they are defined once.
-
-window_make :: proc(buf: ^Buffer, allocator := context.allocator) -> ^Window {
-	panic("STUB: window_make")
-}
-
-window_destroy :: proc(w: ^Window, allocator := context.allocator) {
-	panic("STUB: window_destroy")
-}
-
-window_clear_display_buffer :: proc(w: ^Window) {
-	panic("STUB: window_clear_display_buffer")
-}
-
-window_center_line :: proc(w: ^Window, line: Units_LineCount) {
-	panic("STUB: window_center_line")
-}
-
-window_run_hook_in_own_context :: proc(w: ^Window, hook: Hook, param: string, client_name: string) {
-	panic("STUB: window_run_hook_in_own_context")
-}
-
-context_forget_buffer :: proc(ctx: ^Context, buf: ^Buffer) {
-	panic("STUB: context_forget_buffer")
-}
 
 

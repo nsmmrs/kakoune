@@ -630,7 +630,7 @@ client_redraw_ifn :: proc(c: ^Client) {
 		sels := context_selections(ctx)
 		main_cursor := sels.selections[sels.main].cursor.coord
 		cursor_pos := Coord_Display{}
-		if pos, ok := window_display_coord(window, main_cursor).?; ok {
+		if pos, ok := window_display_coord(window, main_cursor); ok {
 			cursor_pos = pos
 		}
 		user_interface_draw(
@@ -651,7 +651,11 @@ client_redraw_ifn :: proc(c: ^Client) {
 	if .Menu_Show in c.ui_pending || update_menu_anchor {
 		anchor: Maybe(Coord_Display)
 		if c.menu.style == .Inline {
-			anchor = window_display_coord(window, c.menu.anchor)
+			if pos, ok := window_display_coord(window, c.menu.anchor); ok {
+				anchor = pos
+			} else {
+				anchor = nil
+			}
 		} else {
 			anchor = Coord_Display{}
 		}
@@ -696,7 +700,11 @@ client_redraw_ifn :: proc(c: ^Client) {
 	if .Info_Show in c.ui_pending || update_info_anchor {
 		anchor: Maybe(Coord_Display)
 		if client_info_is_inline(c.info.style) {
-			anchor = window_display_coord(window, c.info.anchor)
+			if pos, ok := window_display_coord(window, c.info.anchor); ok {
+				anchor = pos
+			} else {
+				anchor = nil
+			}
 		} else {
 			anchor = Coord_Display{}
 		}
@@ -1202,103 +1210,6 @@ client_busy_indicator_destroy :: proc(bi: ^Busy_Indicator) {
 // these when the owning modules merge)
 // ---------------------------------------------------------------------------
 
-window_set_client :: proc(w: ^Window, c: ^Client) {
-	panic("STUB: window_set_client")
-}
-
-window_set_dimensions :: proc(w: ^Window, dim: Coord_Display) {
-	panic("STUB: window_set_dimensions")
-}
-
-window_run_resize_hook_ifn :: proc(w: ^Window) {
-	panic("STUB: window_run_resize_hook_ifn")
-}
-
-window_needs_redraw :: proc(w: ^Window, ctx: ^Context) -> bool {
-	panic("STUB: window_needs_redraw")
-}
-
-window_update_display_buffer :: proc(w: ^Window, ctx: ^Context) -> ^Display_Buffer {
-	panic("STUB: window_update_display_buffer")
-}
-
-window_display_coord :: proc(w: ^Window, coord: Coord_Buffer) -> Maybe(Coord_Display) {
-	panic("STUB: window_display_coord")
-}
-
-window_buffer :: proc(w: ^Window) -> ^Buffer {
-	panic("STUB: window_buffer")
-}
-
-window_last_display_setup :: proc(w: ^Window) -> ^Display_Setup {
-	panic("STUB: window_last_display_setup")
-}
-
-context_options :: proc(ctx: ^Context) -> ^Option_Manager {
-	panic("STUB: context_options")
-}
-
-context_hooks :: proc(ctx: ^Context) -> ^Hook_Manager {
-	panic("STUB: context_hooks")
-}
-
-context_faces :: proc(ctx: ^Context, allow_local := true) -> ^Face_Registry {
-	panic("STUB: context_faces")
-}
-
-context_buffer :: proc(ctx: ^Context) -> ^Buffer {
-	panic("STUB: context_buffer")
-}
-
-context_client :: proc(ctx: ^Context) -> ^Client {
-	panic("STUB: context_client")
-}
-
-context_window :: proc(ctx: ^Context) -> ^Window {
-	panic("STUB: context_window")
-}
-
-context_has_client :: proc(ctx: ^Context) -> bool {
-	panic("STUB: context_has_client")
-}
-
-context_input_handler :: proc(ctx: ^Context) -> ^Input_Handler {
-	panic("STUB: context_input_handler")
-}
-
-context_selections :: proc(ctx: ^Context, update := true) -> ^Selection_List {
-	panic("STUB: context_selections")
-}
-
-context_selections_write_only :: proc(ctx: ^Context) -> ^Selection_List {
-	panic("STUB: context_selections_write_only")
-}
-
-context_print_status :: proc(
-	ctx: ^Context,
-	prompt, content: Display_Line,
-	cursor_pos: Units_ColumnCount,
-	style: User_Interface_Status_Style,
-) {
-	panic("STUB: context_print_status")
-}
-
-context_set_client :: proc(ctx: ^Context, c: ^Client) {
-	panic("STUB: context_set_client")
-}
-
-context_set_window :: proc(ctx: ^Context, w: ^Window) {
-	panic("STUB: context_set_window")
-}
-
-context_name :: proc(ctx: ^Context) -> string {
-	panic("STUB: context_name")
-}
-
-context_hooks_disabled :: proc(ctx: ^Context) -> ^Utils_Nested_Bool {
-	panic("STUB: context_hooks_disabled")
-}
-
 scoped_selection_edition_make :: proc(ctx: ^Context) -> Scoped_Selection_Edition {
 	panic("STUB: scoped_selection_edition_make")
 }
@@ -1309,10 +1220,6 @@ scoped_selection_edition_destroy :: proc(e: ^Scoped_Selection_Edition) {
 
 option_get_debug_flags :: proc(o: ^Option) -> Option_types_Debug_Flags {
 	panic("STUB: option_get_debug_flags")
-}
-
-global_scope_instance :: proc() -> ^Global_Scope {
-	panic("STUB: global_scope_instance")
 }
 
 buffer_utils_reload_file_buffer :: proc(b: ^Buffer) {
