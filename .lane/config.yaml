@@ -1,0 +1,7 @@
+name: kakoune-odin-port
+columns:
+- backlog
+- todo
+- doing
+- review
+- done
