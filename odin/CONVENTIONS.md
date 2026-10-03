@@ -77,3 +77,7 @@ Rules:
   grep for `panic("STUB:`). If your stub's signature disagrees with the
   real proc, the later merge fails to compile in YOUR file and the
   coordinator fixes your call sites (coordinator owns integration).
+- `knot.odin` missing a type or field you need? Define it LOCALLY with a
+  `KNOTFIX_` prefix (e.g. `KNOTFIX_Buffer_extra_field`) so your code
+  compiles, and report every `KNOTFIX_` item prominently in your final
+  summary. The coordinator moves them into `knot.odin` at merge time.
