@@ -2440,14 +2440,5 @@ option_manager_registry_clear_trash :: proc(reg: ^Options_Registry) {
 	clear(&reg.trash)
 }
 
-// highlighters_line_specs_update refreshes line-specs against the buffer
-// (C++ option_update for LineAndSpecList in highlighters.cc).
-highlighters_line_specs_update :: proc(opt: ^Line_And_Spec_List, ctx: ^Context) {
-	panic("STUB: highlighters_line_specs_update")
-}
-
-// highlighters_range_specs_update refreshes range-specs against the
-// buffer (C++ option_update for RangeAndStringList in highlighters.cc).
-highlighters_range_specs_update :: proc(opt: ^Range_And_String_List, ctx: ^Context) {
-	panic("STUB: highlighters_range_specs_update")
-}
+// highlighters_line_specs_update / highlighters_range_specs_update merged
+// from the highlighters module; stubs deleted.

@@ -1599,7 +1599,7 @@ main_run_server :: proc(
 	main_register_registers(register_manager_instance(), allocator)
 	main_register_keymaps(scope_keymaps(&scope_global_instance().scope))
 	commands_register_all(command_manager_instance())
-	highlighters_register_all()
+	highlighters_register()
 
 	global := scope_global_instance()
 	if opt, err := option_manager_get_option(scope_options(&global.scope), "debug"); err == .None {
@@ -2090,10 +2090,6 @@ json_ui_destroy :: proc(ui: ^User_Interface) {
 
 commands_register_all :: proc(m: ^Command_Manager) {
 	panic("STUB: commands_register_all")
-}
-
-highlighters_register_all :: proc() {
-	panic("STUB: highlighters_register_all")
 }
 
 buffer_utils_open_or_create_file_buffer :: proc(filename: string, allocator := context.allocator) -> ^Buffer {

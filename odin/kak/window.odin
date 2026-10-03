@@ -761,31 +761,5 @@ window_string_column_width :: proc(s: string) -> int {
 }
 
 // ---------------------------------------------------------------------------
-// Stubs: called here, implemented by unmerged modules (STUB protocol)
-// ---------------------------------------------------------------------------
-
-highlighters_init_child :: proc(highlighters: ^Highlighters, parent: ^Highlighters, allocator := context.allocator) {
-	panic("STUB: highlighters_init_child")
-}
-
-highlighters_setup_builtin :: proc(group: ^Highlighter_Group) {
-	panic("STUB: highlighters_setup_builtin")
-}
-
-highlighters_destroy :: proc(highlighters: ^Highlighters) {
-	panic("STUB: highlighters_destroy")
-}
-
-highlighters_highlight :: proc(
-	highlighters: ^Highlighters,
-	ctx: Highlight_Context,
-	display_buffer: ^Display_Buffer,
-	buffer_range: Buffer_Range,
-) {
-	panic("STUB: highlighters_highlight")
-}
-
-highlighters_compute_display_setup :: proc(highlighters: ^Highlighters, ctx: Highlight_Context, setup: ^Display_Setup) {
-	panic("STUB: highlighters_compute_display_setup")
-}
-
+// highlighters_* (init, setup, destroy, highlight, compute_display_setup)
+// merged from the highlighters module; stubs deleted.
