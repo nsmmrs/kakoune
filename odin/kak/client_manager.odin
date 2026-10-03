@@ -140,6 +140,7 @@ client_manager_generate_name :: proc(m: ^Client_Manager, allocator := context.al
 client_manager_create_client :: proc(
 	m: ^Client_Manager,
 	ui: ^User_Interface,
+	ui_type: Main_UI_Type,
 	pid: int,
 	name: string,
 	env_vars: Env_Var_Map,
@@ -170,7 +171,7 @@ client_manager_create_client :: proc(
 	if len(client_name) == 0 {
 		client_name = client_manager_generate_name(m, m.allocator)
 	}
-	c := client_make(ui, ws.window, ws.selections, pid, env_vars, client_name, on_exit, m.allocator)
+	c := client_make(ui, ui_type, ws.window, ws.selections, pid, env_vars, client_name, on_exit, m.allocator)
 	append(&m.clients, c)
 
 	ctx := &c.input_handler.ctx
@@ -355,7 +356,12 @@ client_manager_add_free_window :: proc(m: ^Client_Manager, window: ^Window, sele
 		return
 	}
 	window_clear_display_buffer(window)
-	append(&m.free_windows, Window_And_Selections{window = window, selections = selections})
+	// The C++ takes selections by value (deep vector copy); a header
+	// copy would alias the caller's array and double-free it (ASan
+	// heap-use-after-free via input_handler_destroy + clear).
+	sel := selections
+	cloned := selection_list_clone(&sel, m.allocator)
+	append(&m.free_windows, Window_And_Selections{window = window, selections = cloned})
 }
 
 // client_manager_ensure_no_client_uses_buffer forgets buf in every

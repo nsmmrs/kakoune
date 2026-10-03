@@ -200,6 +200,17 @@ buffer_destroy :: proc(b: ^Buffer) {
 	delete(b.values)
 
 	data := b.scope.data
+	// Undo buffer_manager_create's reparenting: drop the parent-link
+	// watcher so the global scope keeps no dangling pointer to this
+	// buffer's option manager. Other managers' parents are plain
+	// pointers with no parent-side state.
+	if data.options.parent != nil {
+		option_manager_unregister_watcher(
+			data.options.parent,
+			Option_Watcher{data = &data.options, on_option_changed = option_manager_watcher_callback},
+		)
+		data.options.parent = nil
+	}
 	// Option/highlighter entries are owned by their unmerged modules'
 	// paths; nothing can populate them yet, so drop the containers.
 	delete(data.options.options)

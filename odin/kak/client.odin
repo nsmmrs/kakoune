@@ -221,6 +221,7 @@ client_expand_escape_proc :: proc(data: rawptr, s: string) -> string {
 // with client_destroy.
 client_make :: proc(
 	ui: ^User_Interface,
+	ui_type: Main_UI_Type,
 	window: ^Window,
 	selections: Selection_List,
 	pid: int,
@@ -231,6 +232,7 @@ client_make :: proc(
 ) -> ^Client {
 	c := new(Client, allocator)
 	c.ui = ui
+	c.ui_type = ui_type
 	c.window = window
 	c.pid = pid
 	c.on_exit = on_exit
@@ -287,7 +289,10 @@ client_destroy :: proc(c: ^Client) {
 	client_display_line_list_destroy(&c.menu.items, c.allocator)
 	delete(c.pending_keys)
 	env_vars_free(&c.env_vars, c.allocator)
-	free(c.ui, c.allocator)
+	// Dispatch by type like the C++ virtual destructor: terminal and
+	// json UIs must unregister their event watchers; dummy and remote
+	// handles are freed opaquely.
+	main_destroy_ui(c.ui, c.ui_type, c.allocator)
 	alloc := c.allocator
 	free(c, alloc)
 }

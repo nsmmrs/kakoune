@@ -2028,8 +2028,10 @@ remote_accepter_handle_connect :: proc(a: ^Remote_Accepter, s: ^Server, sock: in
 	}
 	ui := remote_ui_make(sock, dimensions, s.allocator)
 	on_exit := Client_On_Exit_Callback{call = remote_ui_on_client_exit, data = ui}
+	// .Dummy destroys the handle opaquely (plain free): the Remote_UI
+	// itself is owned by the disconnect path, not the client.
 	_, create_err := client_manager_create_client(
-		client_manager_instance(), ui.ui, int(pid), name, Env_Var_Map(env_vars), init_cmds, "", init_coord, on_exit,
+		client_manager_instance(), ui.ui, .Dummy, int(pid), name, Env_Var_Map(env_vars), init_cmds, "", init_coord, on_exit,
 	)
 	if create_err != .None {
 		remote_ui_destroy(ui)

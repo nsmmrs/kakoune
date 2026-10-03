@@ -61,9 +61,11 @@ main_error_message :: proc(err: Main_Error, allocator := context.allocator) -> s
 
 // Main_UI_Type selects the local user interface (C++ UIType).
 Main_UI_Type :: enum {
+	// Dummy first: the zero value must mean "opaque handle, plain
+	// free" so zero-initialized Clients destroy safely.
+	Dummy,
 	Terminal,
 	Json,
-	Dummy,
 }
 
 // main_parse_ui_type maps a -ui name to a UI type (C++ parse_ui_type).
@@ -1574,9 +1576,14 @@ main_run_server :: proc(
 	server: Server
 	session_name := session
 	pid_name: string
+	// NOTE: freed at function scope on purpose: `defer` inside the
+	// `if` below would run at the end of that block, freeing pid_name
+	// while session_name still aliases it (use-after-free).
+	defer if len(pid_name) > 0 {
+		delete(pid_name, allocator)
+	}
 	if len(session_name) == 0 {
 		pid_name = main_itoa(int(posix.getpid()), allocator)
-		defer delete(pid_name, allocator)
 		session_name = pid_name
 	}
 	if err := remote_server_init(&server, session_name, .Daemon in flags, allocator); err != .None {
@@ -1695,11 +1702,17 @@ main_run_server :: proc(
 	bm := buffer_manager_instance()
 	if !server.is_daemon {
 		env, _ := env_vars_get(allocator)
-		defer env_vars_free(&env, allocator)
+		// NOTE: no defer-free: client_make takes ownership of env (the
+		// C++ moves get_env_vars() into the Client), so freeing here
+		// would leave the client with a dangling map (ASan
+		// heap-use-after-free). Only free when creation fails before
+		// consuming env.
 		on_exit := Client_On_Exit_Callback{call = main_client_on_exit_call, data = &exit_status}
+		local_ui := main_create_local_ui(ui_type, allocator)
 		local, cerr := client_manager_create_client(
 			cm,
-			main_create_local_ui(ui_type, allocator),
+			local_ui,
+			ui_type,
 			int(posix.getpid()),
 			"",
 			env,
@@ -1710,6 +1723,11 @@ main_run_server :: proc(
 		)
 		if cerr == .None {
 			main_local_client = local
+		} else {
+			// Like the C++ unique_ptr parameter: a failed creation
+			// still destroys the UI it was given.
+			main_destroy_ui(local_ui, ui_type, allocator)
+			env_vars_free(&env, allocator)
 		}
 		if startup_error && main_local_client != nil {
 			faces := scope_faces(&global.scope)
@@ -1790,6 +1808,12 @@ main_run_server :: proc(
 		defer context_destroy(&empty_ctx)
 		hook_manager_run_hook(scope_hooks(&global.scope), .Kak_End, "", &empty_ctx)
 	}
+	// C++ static Singleton destruction: clients and buffers must go
+	// before the global scope (deferred above) so no child option
+	// watcher outlives it. Clients first: window scopes chain to
+	// buffer scopes, which chain to the global scope.
+	client_manager_destroy(client_manager_instance())
+	buffer_manager_destroy(buffer_manager_instance())
 	return exit_status
 }
 

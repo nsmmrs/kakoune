@@ -110,6 +110,13 @@ buffer_manager_create :: proc(
 		return nil, .Name_In_Use
 	}
 	buf = buffer_make(name, flags, lines[:], bom, eolformat, finaleol, fs_status, m.allocator)
+	// C++ Buffer() : Scope{GlobalScope::instance()}: buffer scopes
+	// chain to the global scope for options/hooks/keymaps/aliases/
+	// faces/highlighters. The global scope is always installed on the
+	// production path; standalone test buffers keep a root scope.
+	if g := scope_global_instance(); g != nil {
+		scope_reparent(&buf.scope, &g.scope)
+	}
 	append(&m.buffers, buf)
 	buffer_on_registered(buf)
 	for trashed in m.buffer_trash {

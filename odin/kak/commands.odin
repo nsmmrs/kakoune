@@ -72,10 +72,11 @@ commands_fallback_server := Server{session = "fallback"}
 
 // Test-only default_env override (installed per holder test by
 // test_commands_setup_singletons; production never activates it).
-when ODIN_TEST {
-	commands_test_env: Commands_Env
-	commands_test_env_active := false
-}
+// Declared unconditionally: `odin build` also compiles *_test.odin
+// files (with ODIN_TEST=false), and the commands tests reference
+// these globals, so a `when ODIN_TEST` gate breaks non-test builds.
+commands_test_env: Commands_Env
+commands_test_env_active := false
 
 // commands_default_env builds the production env from the singletons
 // (C++ CommandManager/BufferManager/...::instance()). The server

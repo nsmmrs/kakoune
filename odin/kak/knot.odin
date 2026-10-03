@@ -890,6 +890,7 @@ Client_On_Exit_Callback :: struct {
 // Client is C++ Client. Owns ui, window, input handler. Never copy.
 Client :: struct {
 	ui:                          ^User_Interface,
+	ui_type:                     Main_UI_Type,
 	window:                      ^Window,
 	pid:                         int,
 	on_exit:                     Client_On_Exit_Callback,

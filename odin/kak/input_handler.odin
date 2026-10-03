@@ -2453,7 +2453,11 @@ input_handler_init :: proc(h: ^Input_Handler, selections: Selection_List, flags:
 	h.recorded_keys = make([dynamic]Keys_Key, 0, allocator)
 	h.recording_level = -1
 	context_init(&h.ctx, h, selections, flags, name, allocator)
-	input_handler_push_mode(h, input_handler_normal_make(h, false))
+	// NOTE: the C++ constructor emplaces the initial mode directly;
+	// push_mode reads mode_stack[-1] and traps on the empty stack.
+	mode := input_handler_normal_make(h, false)
+	append(&h.mode_stack, mode)
+	mode.vtable.on_enabled(mode.data, false)
 }
 
 input_handler_make :: proc(selections: Selection_List, flags: Context_Flags, name: string, allocator := context.allocator) -> ^Input_Handler {
