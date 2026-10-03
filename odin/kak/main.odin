@@ -1598,10 +1598,10 @@ main_run_server :: proc(
 	main_register_options(scope_global_option_registry(scope_global_instance()), allocator)
 	main_register_registers(register_manager_instance(), allocator)
 	main_register_keymaps(scope_keymaps(&scope_global_instance().scope))
-	commands_register_all(command_manager_instance())
 	highlighters_register()
 
 	global := scope_global_instance()
+	commands_register_all(command_manager_instance(), global)
 	if opt, err := option_manager_get_option(scope_options(&global.scope), "debug"); err == .None {
 		if parsed, perr := option_types_debug_flags_from_string(debug_flags); perr == .None {
 			option_manager_option_set(opt, parsed, false)
@@ -2102,9 +2102,7 @@ main_entry :: proc(argv: []string, allocator := context.allocator) -> int {
 // --- Stubs: called-but-unmerged procs (STUB protocol; coordinator deletes
 // these when the real procs merge) ---
 
-commands_register_all :: proc(m: ^Command_Manager) {
-	panic("STUB: commands_register_all")
-}
+// commands_register_all merged from the commands module; stub deleted.
 
 // buffer_utils open/create/write/history procs merged from the
 // buffer_utils module; stubs deleted. (main's write_to_file/write_to_fd
