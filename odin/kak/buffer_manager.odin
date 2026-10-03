@@ -336,12 +336,13 @@ buffer_manager_get_first :: proc(m: ^Buffer_Manager) -> (buf: ^Buffer, err: Buff
 
 // buffer_manager_backup_modified writes backup files for modified,
 // writable file buffers (port of
-// BufferManager::backup_modified_buffers). Calls a STUBBED buffer
-// proc once per modified buffer.
+// BufferManager::backup_modified_buffers). Backup failures are ignored:
+// both call sites are last-resort paths (client teardown, fatal
+// signals) where the C++ would throw past the boundary.
 buffer_manager_backup_modified :: proc(m: ^Buffer_Manager) {
 	for buf in m.buffers {
 		if .File in buf.flags && buffer_manager_is_modified(buf) && .Read_Only not_in buf.flags {
-			buffer_utils_write_to_backup_file(buf)
+			_ = buffer_utils_write_to_backup_file(buf)
 		}
 	}
 }
@@ -356,6 +357,5 @@ buffer_manager_clear_trash :: proc(m: ^Buffer_Manager) {
 	clear(&m.buffer_trash)
 }
 
-buffer_utils_write_to_backup_file :: proc(buf: ^Buffer) {
-	panic("STUB: buffer_utils_write_to_backup_file")
-}
+// buffer_utils_write_to_backup_file merged from the buffer_utils module;
+// stub deleted.

@@ -2017,7 +2017,14 @@ remote_accepter_handle_connect :: proc(a: ^Remote_Accepter, s: ^Server, sock: in
 	if stdin, ok := anc.?; ok {
 		anc^ = nil
 		fifo_name := buffer_utils_generate_buffer_name("*stdin-{}*", context.temp_allocator)
-		buffer_utils_create_fifo_buffer(fifo_name, stdin, Buffer_Flags{}, .Not_Initially)
+		_, fifo_err := buffer_utils_create_fifo_buffer(fifo_name, stdin, Buffer_Flags{}, .Not_Initially)
+		if fifo_err != .None {
+			posix.close(posix.FD(stdin))
+			delete(name, s.allocator)
+			delete(init_cmds, s.allocator)
+			env_vars_free(&env_vars, s.allocator)
+			return false, .Disconnected
+		}
 	}
 	ui := remote_ui_make(sock, dimensions, s.allocator)
 	on_exit := Client_On_Exit_Callback{call = remote_ui_on_client_exit, data = ui}
@@ -2035,26 +2042,5 @@ remote_accepter_handle_connect :: proc(a: ^Remote_Accepter, s: ^Server, sock: in
 	return true, .None
 }
 
-// ---------------------------------------------------------------------------
-// Stubs into unmerged modules (STUB protocol: one-line panics)
-// ---------------------------------------------------------------------------
-
-// KNOTFIX_Auto_Scroll ports buffer_utils.hh AutoScroll (fifo buffer
-// scrolling); knot.odin has no equivalent yet.
-KNOTFIX_Auto_Scroll :: enum {
-	No,
-	Not_Initially,
-	Yes,
-}
-
-// buffer_utils_generate_buffer_name ports generate_buffer_name
-// (buffer_utils.hh): expand a *-pattern into a fresh buffer name.
-buffer_utils_generate_buffer_name :: proc(pattern: string, allocator := context.allocator) -> string {
-	panic("STUB: buffer_utils_generate_buffer_name")
-}
-
-// buffer_utils_create_fifo_buffer ports create_fifo_buffer
-// (buffer_utils.hh): open a fifo buffer reading fd.
-buffer_utils_create_fifo_buffer :: proc(name: string, fd: int, flags: Buffer_Flags, scroll: KNOTFIX_Auto_Scroll, allocator := context.allocator) -> ^Buffer {
-	panic("STUB: buffer_utils_create_fifo_buffer")
-}
+// buffer_utils_generate_buffer_name / buffer_utils_create_fifo_buffer merged
+// from the buffer_utils module; stubs (and KNOTFIX_Auto_Scroll) deleted.

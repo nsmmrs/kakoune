@@ -1339,7 +1339,7 @@ main_make_ui :: proc(ui_type: Main_UI_Type, allocator := context.allocator) -> ^
 	case .Terminal:
 		return terminal_ui_make_ui(allocator)
 	case .Json:
-		return json_ui_make(allocator)
+		return json_ui_make_ui(allocator)
 	case .Dummy:
 		return main_make_dummy_ui(allocator)
 	}
@@ -1352,7 +1352,7 @@ main_destroy_ui :: proc(ui: ^User_Interface, ui_type: Main_UI_Type, allocator :=
 	case .Terminal:
 		terminal_ui_destroy_ui(ui, allocator)
 	case .Json:
-		json_ui_destroy(ui)
+		json_ui_destroy_ui(ui, allocator)
 	case .Dummy:
 		free(ui, allocator)
 	}
@@ -1662,8 +1662,8 @@ main_run_server :: proc(
 	}
 
 	for file in files {
-		buf := buffer_utils_open_or_create_file_buffer(file, allocator)
-		if buf == nil {
+		buf, oerr := buffer_utils_open_or_create_file_buffer(file, {}, allocator)
+		if oerr != .None || buf == nil {
 			startup_error = true
 			debug_write_to_debug_buffer(fmt.tprintf("error while opening file '{}'", file))
 			continue
@@ -1843,33 +1843,55 @@ main_run_filter :: proc(
 	}
 
 	bm := buffer_manager_instance()
+	// The C++ wraps the whole loop in try/catch: the first failure
+	// aborts everything left, reports `error: {what}` unconditionally,
+	// then still clears the trash and returns 0.
+	ferr := Buffer_Utils_Error.None
 	for file in files {
-		buf := buffer_utils_open_file_buffer(file, {.No_Hooks}, allocator)
-		if buf == nil {
-			if !quiet {
-				main_write_stderr(fmt.tprintf("error while applying keys to buffer '{}'\n", file))
-			}
-			continue
+		if ferr != .None {
+			break
+		}
+		buf, oerr := buffer_utils_open_file_buffer(file, {.No_Hooks}, allocator)
+		if oerr != .None {
+			ferr = oerr
+			break
 		}
 		if len(suffix_backup) != 0 {
 			name := strings.concatenate({buffer_filename(buf), suffix_backup}, allocator)
 			defer delete(name, allocator)
-			buffer_utils_write_to_file(buf, name, .Overwrite)
-		}
-		apply_to_buffer(buf, keys, quiet, allocator)
-		buffer_utils_write_to_file(buf, buffer_filename(buf), .Overwrite)
-		buffer_manager_delete(bm, buf)
-	}
-	if posix.isatty(0) == false {
-		if content, err := file_read_fd(0, false, allocator); err == .None {
-			defer delete(content, allocator)
-			buf := buffer_utils_create_buffer_from_string("*stdin*", {.No_Hooks}, content, allocator)
-			if buf != nil {
-				apply_to_buffer(buf, keys, quiet, allocator)
-				buffer_utils_write_to_fd(buf, 1)
+			werr := buffer_utils_write_buffer_to_file(buf, name, .Overwrite)
+			if werr != .None {
 				buffer_manager_delete(bm, buf)
+				ferr = werr
+				break
 			}
 		}
+		apply_to_buffer(buf, keys, quiet, allocator)
+		werr := buffer_utils_write_buffer_to_file(buf, buffer_filename(buf), .Overwrite)
+		buffer_manager_delete(bm, buf)
+		if werr != .None {
+			ferr = werr
+			break
+		}
+	}
+	if ferr == .None && posix.isatty(0) == false {
+		if content, err := file_read_fd(0, false, allocator); err == .None {
+			defer delete(content, allocator)
+			buf, cerr := buffer_utils_create_buffer_from_string("*stdin*", {.No_Hooks}, content, allocator)
+			if cerr != .None {
+				ferr = cerr
+			} else {
+				apply_to_buffer(buf, keys, quiet, allocator)
+				werr := buffer_utils_write_buffer_to_fd(buf, 1)
+				buffer_manager_delete(bm, buf)
+				if werr != .None {
+					ferr = werr
+				}
+			}
+		}
+	}
+	if ferr != .None {
+		main_write_stderr(fmt.tprintf("error: {}\n", buffer_utils_error_message(ferr)))
 	}
 	buffer_manager_clear_trash(bm)
 	return 0
@@ -1959,10 +1981,10 @@ main_fatal_handler :: proc "c" (sig: posix.Signal) {
 		"Received {}, exiting.\nPid: {}\nCallstack:\n{}",
 		name,
 		posix.getpid(),
-		debug_backtrace_desc(context.temp_allocator),
+		backtrace_desc(context.temp_allocator),
 	)
 	main_write_stderr(msg)
-	debug_notify_fatal_error(msg)
+	assert_notify_fatal_error(msg)
 	// NOTE: singletons may be only partially constructed here; the C++
 	// guards with has_instance, mirrored by the nil/initialized checks.
 	if remote_server_singleton != nil {
@@ -2080,61 +2102,10 @@ main_entry :: proc(argv: []string, allocator := context.allocator) -> int {
 // --- Stubs: called-but-unmerged procs (STUB protocol; coordinator deletes
 // these when the real procs merge) ---
 
-json_ui_make :: proc(allocator := context.allocator) -> ^User_Interface {
-	panic("STUB: json_ui_make")
-}
-
-json_ui_destroy :: proc(ui: ^User_Interface) {
-	panic("STUB: json_ui_destroy")
-}
-
 commands_register_all :: proc(m: ^Command_Manager) {
 	panic("STUB: commands_register_all")
 }
 
-buffer_utils_open_or_create_file_buffer :: proc(filename: string, allocator := context.allocator) -> ^Buffer {
-	panic("STUB: buffer_utils_open_or_create_file_buffer")
-}
-
-buffer_utils_open_file_buffer :: proc(filename: string, flags: Buffer_Flags, allocator := context.allocator) -> ^Buffer {
-	panic("STUB: buffer_utils_open_file_buffer")
-}
-
-buffer_utils_create_buffer_from_string :: proc(
-	name: string,
-	flags: Buffer_Flags,
-	content: string,
-	allocator := context.allocator,
-) -> ^Buffer {
-	panic("STUB: buffer_utils_create_buffer_from_string")
-}
-
-buffer_utils_write_to_file :: proc(buf: ^Buffer, filename: string, method: File_Write_Method) {
-	panic("STUB: buffer_utils_write_to_file")
-}
-
-buffer_utils_write_to_fd :: proc(buf: ^Buffer, fd: int) {
-	panic("STUB: buffer_utils_write_to_fd")
-}
-
-buffer_utils_history_as_strings :: proc(
-	history: []Buffer_History_Node,
-	allocator := context.allocator,
-) -> [dynamic]string {
-	panic("STUB: buffer_utils_history_as_strings")
-}
-
-buffer_utils_undo_group_as_strings :: proc(
-	group: []Buffer_Modification,
-	allocator := context.allocator,
-) -> [dynamic]string {
-	panic("STUB: buffer_utils_undo_group_as_strings")
-}
-
-debug_backtrace_desc :: proc(allocator := context.allocator) -> string {
-	panic("STUB: debug_backtrace_desc")
-}
-
-debug_notify_fatal_error :: proc(msg: string) {
-	panic("STUB: debug_notify_fatal_error")
-}
+// buffer_utils open/create/write/history procs merged from the
+// buffer_utils module; stubs deleted. (main's write_to_file/write_to_fd
+// guesses were renamed to write_buffer_to_file/write_buffer_to_fd.)

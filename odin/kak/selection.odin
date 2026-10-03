@@ -1007,20 +1007,6 @@ selection_list_make_multi :: proc(
 	}
 }
 
-// --- Buffer / buffer_utils stubs (owned by those modules; STUB protocol) ---
-
-buffer_utils_get_column :: proc(buffer: ^Buffer, tabstop: Coord_Column, coord: Coord_Buffer) -> Coord_Column {
-	panic("STUB: buffer_utils_get_column")
-}
-
-buffer_utils_column_length :: proc(buffer: ^Buffer, tabstop: Coord_Column, line: Units_LineCount) -> Coord_Column {
-	panic("STUB: buffer_utils_column_length")
-}
-
-buffer_utils_get_byte_to_column :: proc(
-	buffer: ^Buffer,
-	tabstop: Coord_Column,
-	coord: Coord_Display,
-) -> Units_ByteCount {
-	panic("STUB: buffer_utils_get_byte_to_column")
-}
+// buffer_utils_get_column / buffer_utils_column_length /
+// buffer_utils_get_byte_to_column merged from the buffer_utils module;
+// stubs deleted.

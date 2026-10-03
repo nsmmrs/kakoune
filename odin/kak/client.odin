@@ -928,14 +928,21 @@ client_change_buffer :: proc(c: ^Client, buffer: ^Buffer, set_selections: Maybe(
 
 // client_reload_buffer reloads the client's buffer from disk (port of
 // Client::reload_buffer).
-//
-// GAP: the C++ reports reload failures on the status line and refreshes
-// the fs status; without error returns that path is unported (see the
-// module note).
 client_reload_buffer :: proc(c: ^Client) {
 	ctx := client_context(c)
 	buffer := context_buffer(ctx)
-	buffer_utils_reload_file_buffer(buffer)
+	if rerr := buffer_utils_reload_file_buffer(buffer); rerr != .None {
+		emsg, err := format_format("error while reloading buffer: '{}'", []string{buffer_utils_error_message(rerr)}, c.allocator)
+		if err != .None {
+			emsg = "error while reloading buffer"
+		}
+		econtent := client_display_line_from_text(emsg, client_face(context_faces(ctx), "Error"), c.allocator)
+		client_print_status(c, Display_Line{}, econtent, Units_ColumnCount(-1), .Status)
+		if status, serr := file_get_fs_status(buffer.filename); serr == .None {
+			buffer_set_fs_status(buffer, status)
+		}
+		return
+	}
 	msg, err := format_format("'{}' reloaded", []string{buffer.display_name}, c.allocator)
 	if err != .None {
 		msg = "'?' reloaded"
@@ -1214,12 +1221,7 @@ client_busy_indicator_destroy :: proc(bi: ^Busy_Indicator) {
 // scoped_selection_edition_make, scoped_selection_edition_destroy,
 // option_get_debug_flags.)
 
-buffer_utils_reload_file_buffer :: proc(b: ^Buffer) {
-	panic("STUB: buffer_utils_reload_file_buffer")
-}
-
-debug_write_to_buffer :: proc(s: string) {
-	panic("STUB: debug_write_to_buffer")
-}
+// buffer_utils_reload_file_buffer merged from the buffer_utils module,
+// debug_write_to_buffer from the debug module; stubs deleted.
 
 // (Remainder stub implemented in command_manager.odin: command_expand.)

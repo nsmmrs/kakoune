@@ -584,7 +584,14 @@ normal_goto_file :: proc(ctx: ^Context, d: ^normal_Goto_Data) {
 			if utils_nested_bool_is_set(context_hooks_disabled(ctx)^) {
 				flags = {.No_Hooks}
 			}
-			target = buffer_utils_open_file_buffer(path.path, flags)
+			opened, oerr := buffer_utils_open_file_buffer(path.path, flags)
+			if oerr != .None || opened == nil {
+				msg, _ := format_format("unable to open '{}'", []string{path.path}, context.temp_allocator)
+				defer delete(msg, context.temp_allocator)
+				normal_fail(ctx, msg)
+				return
+			}
+			target = opened
 			buffer_set_flags(target, buffer_flags(target) & ~Buffer_Flags{.No_Hooks})
 		}
 		if i == sels.main {

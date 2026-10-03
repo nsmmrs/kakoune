@@ -1653,10 +1653,7 @@ command_expand :: proc(
 // hook_manager.odin also live here so they are defined exactly once.
 // ---------------------------------------------------------------------------
 
-// C++ write_to_debug_buffer (debug.hh).
-debug_write_to_debug_buffer :: proc(str: string) {
-	panic("STUB: debug_write_to_debug_buffer")
-}
+// debug_write_to_debug_buffer merged from the debug module; stub deleted.
 
 // C++ Context::options (context.hh).
 // C++ OptionManager::operator[] (option_manager.hh). Returns the named
