@@ -1,7 +1,7 @@
 ---
 id: EPIC-t0s95v
 title: "Plan wave 4 (buffer core types)"
-status: backlog
+status: done
 type: epic
 priority: 3
 deps:
@@ -13,7 +13,10 @@ deps:
 - TASK-g3tqlh
 - TASK-pdvdf3
 created: "2026-10-03T10:07:02.888587Z"
-updated: "2026-10-03T10:07:02.888587Z"
+updated: "2026-10-03T10:30:57.304558Z"
 ---
+
+
+
 
 After wave 3 merges: centrally spec Buffer Window Client Context types, then fan out.
