@@ -6,9 +6,9 @@
 // completion candidates, and the generic prefixed list.
 //
 // The small string helpers here (quoting, escape/unescape, split, join,
-// str_to_int) mirror src/string_utils.hh; option_types needs them and
-// must compile standalone, so they live here until the string module
-// lands, at which point they should delegate to it.
+// str_to_int) are thin wrappers over the canonical string_utils and
+// ranges implementations; option_types keeps its own signatures (and
+// error enum) so existing callers are unaffected.
 //
 // Error handling: every fallible proc returns Option_types_Error with
 // None (= 0) as success, replacing the C++ runtime_error throws.
@@ -88,56 +88,33 @@ option_types_error_message :: proc(err: Option_types_Error) -> string {
 
 // option_types_replace rewrites s replacing every non-overlapping
 // occurrence of substr with replacement, scanning left to right.
+// Thin wrapper over string_utils_replace.
 option_types_replace :: proc(
 	s, substr, replacement: string,
 	allocator := context.allocator,
 ) -> string {
-	if len(substr) == 0 {
-		// The C++ loop never advances on an empty pattern; return a copy.
-		return strings.clone(s, allocator)
-	}
-	b := strings.builder_make(allocator)
-	defer strings.builder_destroy(&b)
-	i := 0
-	for i <= len(s) {
-		j := strings.index(s[i:], substr)
-		if j < 0 {
-			strings.write_string(&b, s[i:])
-			break
-		}
-		strings.write_string(&b, s[i:i + j])
-		strings.write_string(&b, replacement)
-		i += j + len(substr)
-	}
-	return strings.clone(strings.to_string(b), allocator)
+	return string_utils_replace(s, substr, replacement, allocator)
 }
 
 // option_types_double_up duplicates every byte of s found in characters.
+// Thin wrapper over string_utils_double_up.
 option_types_double_up :: proc(
 	s, characters: string,
 	allocator := context.allocator,
 ) -> string {
-	b := strings.builder_make(allocator)
-	defer strings.builder_destroy(&b)
-	for i := 0; i < len(s); i += 1 {
-		strings.write_byte(&b, s[i])
-		if strings.index_byte(characters, s[i]) >= 0 {
-			strings.write_byte(&b, s[i])
-		}
-	}
-	return strings.clone(strings.to_string(b), allocator)
+	return string_utils_double_up(s, characters, allocator)
 }
 
 // option_types_quote quotes s Kakoune style: 'it''s'.
+// Thin wrapper over string_utils_quote.
 option_types_quote :: proc(s: string, allocator := context.allocator) -> string {
-	dup := option_types_double_up(s, "'", context.temp_allocator)
-	return strings.concatenate({"'", dup, "'"}, allocator)
+	return string_utils_quote(s, allocator)
 }
 
 // option_types_shell_quote quotes s shell style: 'it'\''s'.
+// Thin wrapper over string_utils_shell_quote.
 option_types_shell_quote :: proc(s: string, allocator := context.allocator) -> string {
-	rep := option_types_replace(s, "'", "'\\''", context.temp_allocator)
-	return strings.concatenate({"'", rep, "'"}, allocator)
+	return string_utils_shell_quote(s, allocator)
 }
 
 // option_types_apply_quoting quotes s per quoting (the C++ quoter).
@@ -148,11 +125,11 @@ option_types_apply_quoting :: proc(
 ) -> string {
 	switch quoting {
 	case .Raw:
-		return strings.clone(s, allocator)
+		return string_utils_quote_raw(s, allocator)
 	case .Kakoune:
-		return option_types_quote(s, allocator)
+		return string_utils_quote(s, allocator)
 	case .Shell:
-		return option_types_shell_quote(s, allocator)
+		return string_utils_shell_quote(s, allocator)
 	}
 	unreachable()
 }
@@ -160,196 +137,89 @@ option_types_apply_quoting :: proc(
 // option_types_str_to_int_ifp parses an optional '-' followed by digits.
 // Like the C++ version it accumulates into a 32 bit word with wraparound,
 // so huge inputs wrap instead of failing.
+// Thin wrapper over string_utils_str_to_int_ifp.
 option_types_str_to_int_ifp :: proc(s: string) -> (int, bool) {
-	rest := s
-	negative := len(rest) > 0 && rest[0] == '-'
-	if negative {
-		rest = rest[1:]
-	}
-	if len(rest) == 0 {
-		return 0, false
-	}
-	res: u32 = 0
-	for i := 0; i < len(rest); i += 1 {
-		c := rest[i]
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-		res = res * 10 + u32(c - '0')
-	}
-	if negative {
-		res = 0 - res
-	}
-	return int(i32(res)), true
+	return string_utils_str_to_int_ifp(s)
 }
 
 // option_types_str_to_int parses s as an int, NotANumber on failure.
+// Delegates to string_utils_str_to_int, mapping its error enum.
 option_types_str_to_int :: proc(s: string) -> (int, Option_types_Error) {
-	if val, ok := option_types_str_to_int_ifp(s); ok {
-		return val, .None
+	val, err := string_utils_str_to_int(s)
+	if err != .None {
+		return 0, .NotANumber
 	}
-	return 0, .NotANumber
+	return val, .None
 }
 
 // option_types_escape prefixes every byte of s found in characters with
-// the escape byte.
+// the escape byte. Thin wrapper over string_utils_escape.
 option_types_escape :: proc(
 	s, characters: string,
 	escape: byte,
 	allocator := context.allocator,
 ) -> string {
-	b := strings.builder_make(allocator)
-	defer strings.builder_destroy(&b)
-	for i := 0; i < len(s); i += 1 {
-		if strings.index_byte(characters, s[i]) >= 0 {
-			strings.write_byte(&b, escape)
-		}
-		strings.write_byte(&b, s[i])
-	}
-	return strings.clone(strings.to_string(b), allocator)
+	return string_utils_escape(s, characters, escape, allocator)
 }
 
 // option_types_unescape drops an escape byte that precedes a byte found
 // in characters; other escape bytes (trailing, or before other bytes)
-// are kept literally.
+// are kept literally. Thin wrapper over string_utils_unescape.
 option_types_unescape :: proc(
 	s, characters: string,
 	escape: byte,
 	allocator := context.allocator,
 ) -> string {
-	b := strings.builder_make(allocator)
-	defer strings.builder_destroy(&b)
-	i := 0
-	for i < len(s) {
-		j := strings.index_byte(s[i:], escape)
-		if j < 0 {
-			strings.write_string(&b, s[i:])
-			break
-		}
-		k := i + j
-		if k + 1 < len(s) && strings.index_byte(characters, s[k + 1]) >= 0 {
-			strings.write_string(&b, s[i:k])
-			strings.write_byte(&b, s[k + 1])
-			i = k + 2
-		} else {
-			strings.write_string(&b, s[i:k + 1])
-			i = k + 1
-		}
-	}
-	return strings.clone(strings.to_string(b), allocator)
+	return string_utils_unescape(s, characters, escape, allocator)
 }
 
 // option_types_split splits s on separator, keeping empty parts; an
-// empty input yields zero parts. Parts are views into s.
+// empty input yields zero parts. Parts are views into s. Delegates to
+// ranges_split (the canonical port of C++ split()); the slice shares the
+// dynamic array's backing and the caller frees it with delete as before.
 option_types_split :: proc(
 	s: string,
 	separator: byte,
 	allocator := context.allocator,
 ) -> []string {
-	if len(s) == 0 {
-		return make([]string, 0, allocator)
-	}
-	count := 1
-	for i := 0; i < len(s); i += 1 {
-		if s[i] == separator {
-			count += 1
-		}
-	}
-	res := make([]string, count, allocator)
-	part, start := 0, 0
-	for i := 0; i < len(s); i += 1 {
-		if s[i] == separator {
-			res[part] = s[start:i]
-			part += 1
-			start = i + 1
-		}
-	}
-	res[part] = s[start:]
-	return res
+	dyn := ranges_split(s, separator, allocator)
+	return dyn[:]
 }
 
 // option_types_split_escaped splits s on separator unless the separator
 // is escaped by the escaper byte (an escaper escapes the next byte, and
 // an escaped escaper loses its meaning). Escapes are left in place for
-// option_types_unescape to remove. Parts are views into s.
+// option_types_unescape to remove. Parts are views into s. Delegates to
+// ranges_split_escaped; the caller frees the slice with delete as before.
 option_types_split_escaped :: proc(
 	s: string,
 	separator, escaper: byte,
 	allocator := context.allocator,
 ) -> []string {
-	if len(s) == 0 {
-		return make([]string, 0, allocator)
-	}
-	count := 1
-	escaped := false
-	for i := 0; i < len(s); i += 1 {
-		if !escaped && s[i] == separator {
-			count += 1
-		}
-		escaped = !escaped && s[i] == escaper
-	}
-	res := make([]string, count, allocator)
-	part, start := 0, 0
-	escaped = false
-	for i := 0; i < len(s); i += 1 {
-		if !escaped && s[i] == separator {
-			res[part] = s[start:i]
-			part += 1
-			start = i + 1
-		}
-		escaped = !escaped && s[i] == escaper
-	}
-	res[part] = s[start:]
-	return res
+	dyn := ranges_split_escaped(s, separator, escaper, allocator)
+	return dyn[:]
 }
 
 // option_types_join joins parts with joiner, optionally escaping the
 // joiner and backslash inside each part first.
+// Thin wrapper over string_utils_join_char.
 option_types_join :: proc(
 	parts: []string,
 	joiner: byte,
 	escape_joiner := true,
 	allocator := context.allocator,
 ) -> string {
-	chars_buf: [2]byte
-	chars_buf[0] = joiner
-	chars_buf[1] = '\\'
-	b := strings.builder_make(allocator)
-	defer strings.builder_destroy(&b)
-	for i := 0; i < len(parts); i += 1 {
-		if i > 0 {
-			strings.write_byte(&b, joiner)
-		}
-		if escape_joiner {
-			esc := option_types_escape(
-				parts[i],
-				string(chars_buf[:]),
-				'\\',
-				context.temp_allocator,
-			)
-			strings.write_string(&b, esc)
-		} else {
-			strings.write_string(&b, parts[i])
-		}
-	}
-	return strings.clone(strings.to_string(b), allocator)
+	return string_utils_join_char(parts, joiner, escape_joiner, allocator)
 }
 
 // option_types_join_with joins parts with a string joiner, no escaping.
+// Thin wrapper over string_utils_join_str.
 option_types_join_with :: proc(
 	parts: []string,
 	joiner: string,
 	allocator := context.allocator,
 ) -> string {
-	b := strings.builder_make(allocator)
-	defer strings.builder_destroy(&b)
-	for i := 0; i < len(parts); i += 1 {
-		if i > 0 {
-			strings.write_string(&b, joiner)
-		}
-		strings.write_string(&b, parts[i])
-	}
-	return strings.clone(strings.to_string(b), allocator)
+	return string_utils_join_str(parts, joiner, allocator)
 }
 
 // option_types_int_to_string formats an int option value.
