@@ -2864,14 +2864,6 @@ input_handler_scroll_window :: proc(ctx: ^Context, offset: Units_LineCount, on_h
 // scoped_edition_destroy, buffer_offset_coord_char, buffer_offset_coord_line,
 // buffer_iterator_value, selection_list_make_multi.)
 
-normal_get_command :: proc(key: Keys_Key) -> (Normal_Cmd, bool) {
-	panic("STUB: normal_get_command")
-}
-
-normal_paste_pos :: proc(buffer: ^Buffer, min, max: Coord_Buffer, mode: Paste_Mode, linewise: bool) -> Coord_Buffer {
-	panic("STUB: normal_paste_pos")
-}
-
 // (Remainder stubs implemented in command_manager.odin: command_parser_make,
 // command_parser_read_token.)
 
