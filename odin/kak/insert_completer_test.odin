@@ -1,7 +1,8 @@
 // Tests for the insert_completer port. No C++ UnitTest exists for this
 // module, so these are edge-case tests over the standalone-testable
 // surface: nothing here touches a STUBBED proc (word_db, buffer_utils,
-// buffer manager singletons) or a real Context/Client.
+// buffer manager singletons), a Client, or hooks; one test drives
+// select() through a clientless Context with staging selections.
 package kak
 
 import "core:mem"
@@ -386,20 +387,68 @@ test_insert_completer_shorten_display_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, suffix, "123456789012345678901")
 }
 
+// shifting inserted ranges across an edit keeps one entry per range:
+// the selection scratch must start empty, or the write-back indexes
+// past the end
 @(test)
 test_insert_completer_update_inserted_ranges :: proc(t: ^testing.T) {
-	lines := []string{"hello world\n"}
-	buf := buffer_make("*test*", {}, lines, .None, .Lf, .Present, File_Fs_Status{})
-	defer buffer_destroy(buf)
+	b := buffer_utils_test_make_buffer({"hello\n"}, {.No_Hooks}, "compl-ranges")
+	defer buffer_destroy(b)
 	c := Insert_Completer{}
 	defer insert_completer_destroy(&c)
-	append(&c.inserted_ranges, Buffer_Range{Coord_Buffer{0, 0}, Coord_Buffer{0, 5}})
-	c.completions.timestamp = buffer_timestamp(buf)
-	// Must not panic: the scratch selections array must hold exactly
-	// one entry per inserted range (a make-with-len plus append
-	// doubled it and indexed past the ranges).
-	insert_completer_update_inserted_ranges(&c, buf)
-	testing.expect_value(t, len(c.inserted_ranges), 1)
-	testing.expect_value(t, c.inserted_ranges[0].begin, Coord_Buffer{0, 0})
-	testing.expect_value(t, c.inserted_ranges[0].end, Coord_Buffer{0, 5})
+	c.inserted_ranges = make([dynamic]Buffer_Range, context.allocator)
+	append(&c.inserted_ranges, Buffer_Range{{0, 0}, {0, 2}}, Buffer_Range{{0, 3}, {0, 5}})
+	c.completions.timestamp = buffer_timestamp(b)
+	// Edit before the ranges so the update has work to do.
+	_, err := buffer_insert(b, Coord_Buffer{0, 0}, "xy")
+	testing.expect_value(t, err, Buffer_Error.None)
+	insert_completer_update_inserted_ranges(&c, b)
+	testing.expect_value(t, len(c.inserted_ranges), 2)
+	testing.expect_value(t, c.inserted_ranges[0], Buffer_Range{{0, 2}, {0, 4}})
+	testing.expect_value(t, c.inserted_ranges[1], Buffer_Range{{0, 5}, {0, 7}})
+}
+
+// Selecting a candidate and then selecting back to the original-text
+// entry (<c-n><c-p>) must restore the buffer: completions begin/end
+// track the post-replace cursor (C++ binds cursor_pos as a live
+// reference to the main selection; a pre-replace snapshot makes the
+// second select compute a wrong ref, match nothing, and leak the
+// candidate text into the buffer, as in test/hooks/completion-hide).
+@(test)
+test_insert_completer_select_round_trip_restores_original :: proc(t: ^testing.T) {
+	// Two empty lines (stored with newlines, as in *scratch*): the
+	// cursor must not sit at buffer end, where the end_c != end_coord
+	// guard skips the range.
+	b := buffer_utils_test_make_buffer({"\n", "\n"}, {.No_Hooks}, "compl-select")
+	defer buffer_destroy(b)
+	sel := context_test_make_selection({0, 0}, {0, 0})
+	defer context_test_free_selection(&sel)
+	ctx := Context{}
+	ctx.selection_history.staging = Context_Selection_History_Node{
+		list = context_test_make_selections(b, 0, []Selection{sel}),
+	}
+	defer selection_list_destroy(context_selection_history_selections(&ctx.selection_history, false))
+	opts := Option_Manager{}
+	defer delete(opts.watchers)
+	c := Insert_Completer{ctx = &ctx, options = &opts}
+	defer insert_completer_destroy(&c)
+
+	c.enabled = true
+	c.completions.begin = Coord_Buffer{0, 0}
+	c.completions.end = Coord_Buffer{0, 0}
+	append(&c.completions.candidates, insert_completer_test_candidate("foo()"))
+	append(&c.completions.candidates, insert_completer_test_candidate(""))
+	c.current_candidate = 1
+
+	// <c-n>: apply the candidate; begin/end cover the inserted text.
+	insert_completer_select(&c, 1, true, nil, nil)
+	testing.expect_value(t, c.current_candidate, 0)
+	testing.expect_value(t, buffer_line(b, 0), "foo()\n")
+	testing.expect_value(t, c.completions.begin, Coord_Buffer{0, 0})
+	testing.expect_value(t, c.completions.end, Coord_Buffer{0, 5})
+
+	// <c-p>: back to the original (empty) text restores the buffer.
+	insert_completer_select(&c, -1, true, nil, nil)
+	testing.expect_value(t, c.current_candidate, 1)
+	testing.expect_value(t, buffer_line(b, 0), "\n")
 }

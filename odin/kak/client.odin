@@ -16,10 +16,6 @@
 // client_info_show_string (see the note there).
 //
 // Known gaps (reported to the coordinator, see the final summary):
-//   - The merged user_interface callbacks carry no user data, so
-//     client_make cannot install the on-key/on-paste handlers. Their
-//     logic lives in client_handle_ui_key / client_handle_ui_paste,
-//     ready to be wired once the API grows a data pointer.
 //   - C++ try/catch sites (per-key errors, modelinefmt errors, reload
 //     errors) have no Odin error plumbing yet; only success paths are
 //     ported until the callee modules define error returns.
@@ -119,7 +115,9 @@ KNOTFIX_ui_line :: proc(l: ^Display_Line) -> User_Interface_Display_Line {
 
 // KNOTFIX_ui_lines wraps display lines for the merged user_interface
 // procs. The returned slice is scratch (see allocator) borrowing
-// lines; it must not outlive the call.
+// lines; it must not outlive the call, and the caller must delete it
+// with the same allocator (temp_allocator memory must never be freed
+// with the heap allocator).
 KNOTFIX_ui_lines :: proc(lines: []Display_Line, allocator := context.allocator) -> []User_Interface_Display_Line {
 	wrapped := make([]User_Interface_Display_Line, len(lines), allocator)
 	for &line, i in lines {
@@ -702,7 +700,7 @@ client_redraw_ifn :: proc(c: ^Client) {
 
 	if .Menu_Show in c.ui_pending {
 		if ui_anchor, ok := c.menu.ui_anchor.?; ok {
-			choices := KNOTFIX_ui_lines(c.menu.items[:], context.temp_allocator)
+			choices := KNOTFIX_ui_lines(c.menu.items[:])
 			defer delete(choices)
 			user_interface_menu_show(
 				c.ui,
@@ -753,7 +751,7 @@ client_redraw_ifn :: proc(c: ^Client) {
 	if .Info_Show in c.ui_pending {
 		if ui_anchor, ok := c.info.ui_anchor.?; ok {
 			title := KNOTFIX_ui_line(&c.info.title)
-			content := KNOTFIX_ui_lines(c.info.content[:], context.temp_allocator)
+			content := KNOTFIX_ui_lines(c.info.content[:])
 			defer delete(content)
 			face_name := "Information"
 			if client_info_is_inline(c.info.style) || c.info.style == .Menu_Doc {
@@ -811,8 +809,10 @@ client_generate_mode_line :: proc(c: ^Client, allocator := context.allocator) ->
 	atoms := make(map[string]Display_Line, 2, allocator)
 	defer delete(atoms)
 	atoms["mode_info"] = info.display_line
+	context_info_text := client_generate_context_info(ctx, allocator)
+	defer delete(context_info_text, allocator)
 	context_info := client_display_line_from_text(
-		client_generate_context_info(ctx, allocator),
+		context_info_text,
 		client_face(context_faces(ctx), "Information"),
 		allocator,
 	)

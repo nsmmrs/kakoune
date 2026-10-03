@@ -131,8 +131,8 @@ Json_Ui :: struct {
 	on_key:     User_Interface_On_Key_Callback,
 	on_paste:   User_Interface_On_Paste_Callback,
 	dimensions: Coord_Display,
-	requests:   string, // owned with allocator
-	allocator:  mem.Allocator,
+	requests:      string, // owned with allocator
+	allocator:     mem.Allocator,
 }
 
 // json_ui_active is the UI owning stdin (there can only be one stdin

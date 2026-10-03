@@ -1,6 +1,7 @@
 package kak
 
 import "core:mem"
+import "core:sync"
 import "core:testing"
 
 // Port of the C++ UnitTest group "merge_selection": merges new_sel
@@ -590,4 +591,52 @@ normal_test_prompt_env_vars_own_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, env_vars["register"], "a")
 	env_vars_free(&env_vars, alloc)
 	testing.expect_value(t, len(track.allocation_map), 0)
+}
+
+// opening a : prompt clones its shell env keys: Env_Var_Map owns
+// keys and values, so static literals would corrupt the heap when
+// the prompt is destroyed (env_vars_free deletes them). Two live
+// prompts must hold distinct key storage (a shared literal would
+// compare equal).
+@(test)
+normal_test_command_prompt_env_keys_owned :: proc(t: ^testing.T) {
+	// Same singleton needs as test_commands_prompt_push
+	// (input_handler_prompt_make dereferences the register
+	// manager): deschedule, then hold the mutex across the body.
+	test_commands_deschedule_for_register()
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+	if !test_commands_register_hold() {
+		testing.expect(t, false, "register manager stayed busy")
+		return
+	}
+	defer test_commands_register_release()
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	client := test_commands_make_client(f, buf, "c1")
+	ctx := &client.input_handler.ctx
+
+	before := len(client.input_handler.mode_stack)
+	normal_cmd_command(ctx, Normal_Params{})
+	normal_cmd_command(ctx, Normal_Params{count = 3, reg = 'x'})
+	testing.expect(t, len(client.input_handler.mode_stack) == before + 2)
+	key_ptr := proc(mode: ^Input_Mode, want: string) -> rawptr {
+		p := (^input_handler_Prompt)(mode.data)
+		d := (^normal_Command_Data)(p.callback.data)
+		for k in d.env_vars {
+			if k == want {
+				return rawptr(raw_data(k))
+			}
+		}
+		return nil
+	}
+	first := client.input_handler.mode_stack[before]
+	second := client.input_handler.mode_stack[before + 1]
+	testing.expect(t, key_ptr(first, "count") != nil)
+	testing.expect(t, key_ptr(first, "count") != key_ptr(second, "count"))
+	testing.expect(t, key_ptr(first, "register") != nil)
+	testing.expect(t, key_ptr(first, "register") != key_ptr(second, "register"))
 }

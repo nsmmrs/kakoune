@@ -208,8 +208,14 @@ insert_completer_select :: proc(
 		return
 	}
 	selection_list_update(sels)
-	c.completions.end = cursor_pos
-	c.completions.begin = buffer_advance(buffer, cursor_pos, -Units_ByteCount(len(candidate.completion)))
+	// C++ binds cursor_pos as a live reference to the main selection's
+	// cursor, so end/begin observe the POST-update cursor (after the
+	// inserted completion). The snapshot above is stale: re-read it,
+	// else a later select (e.g. <c-p> back to the original text)
+	// computes a wrong ref and matches nothing.
+	updated_cursor := selection_list_main(sels).cursor.coord
+	c.completions.end = updated_cursor
+	c.completions.begin = buffer_advance(buffer, updated_cursor, -Units_ByteCount(len(candidate.completion)))
 	c.completions.timestamp = buffer_timestamp(buffer)
 	clear(&c.inserted_ranges)
 	append(&c.inserted_ranges, ..ranges[:])

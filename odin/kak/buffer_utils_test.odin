@@ -841,6 +841,10 @@ buffer_utils_test_fifo_phase :: proc(
 
 @(test)
 buffer_utils_test_fifo :: proc(t: ^testing.T) {
+	// Serialize with buffer_utils_test_fifo_destroy_open: both mutate
+	// the process-global owners registry.
+	sync.mutex_lock(&event_manager_test_singleton_mutex)
+	defer sync.mutex_unlock(&event_manager_test_singleton_mutex)
 	// The registry is a process-lifetime singleton; drop its backing
 	// here so per-test tracking sees no leftover.
 	defer {
@@ -865,4 +869,62 @@ buffer_utils_test_fifo :: proc(t: ^testing.T) {
 	buffer_utils_fifo_on_event(&watcher, {.Read}, .Normal)
 	testing.expect_value(t, len(buffer_utils_fifo_owners), 0)
 	buffer_utils_test_expect_lines(t, b, {"p\n", "q\n"})
+}
+
+// destroying a buffer with an open fifo tears the watcher down
+// (~FifoWatcher): the watcher unregisters from the event manager,
+// the fd closes, and the registry entry drops (no teardown assert,
+// no leak)
+@(test)
+buffer_utils_test_fifo_destroy_open :: proc(t: ^testing.T) {
+	sync.mutex_lock(&event_manager_test_singleton_mutex)
+	defer sync.mutex_unlock(&event_manager_test_singleton_mutex)
+	manager: Event_Manager
+	event_manager_init(&manager)
+	defer event_manager_destroy(&manager)
+	defer {
+		delete(buffer_utils_fifo_owners)
+		buffer_utils_fifo_owners = nil
+	}
+
+	b := buffer_utils_test_make_buffer({"\n"}, {.No_Hooks}, "fifo-open-destroy")
+	read_fd, write_fd := buffer_utils_test_pipe(t, "ab\n")
+	// The write end stays open: the fifo is NOT at EOF.
+	defer posix.close(posix.FD(write_fd))
+	stored := value_make(Buffer_Utils_Fifo_Watcher{buffer = b, scroll = .Yes}, b.allocator)
+	fifo, cast_err := value_as(stored, Buffer_Utils_Fifo_Watcher)
+	testing.expect_value(t, cast_err, Value_Error.None)
+	if cast_err != .None {
+		value_free(&stored, b.allocator)
+		posix.close(posix.FD(read_fd))
+		buffer_destroy(b)
+		return
+	}
+	event_manager_fd_watcher_init(&fifo.watcher, read_fd, {.Read}, .Normal, buffer_utils_fifo_on_event)
+	buffer_utils_fifo_register(&fifo.watcher, fifo)
+	b.flags |= {.Fifo, .No_Undo}
+	b.values[buffer_utils_fifo_id()] = stored
+	testing.expect_value(t, len(manager.fd_watchers), 1)
+
+	before: posix.stat_t
+	testing.expect_value(t, posix.fstat(posix.FD(read_fd), &before), posix.result.OK)
+	buffer_destroy(b)
+	testing.expect_value(t, len(manager.fd_watchers), 0)
+	testing.expect_value(t, len(buffer_utils_fifo_owners), 0)
+	// The fd must be closed, but another thread may recycle the
+	// number before this check runs: pass when fstat fails OR the
+	// identity changed (a recycled fd is never our pipe). Only the
+	// same (dev, ino) still open proves the close was missed.
+	after: posix.stat_t
+	closed_or_recycled :=
+		posix.fstat(posix.FD(read_fd), &after) != .OK ||
+		after.st_dev != before.st_dev || after.st_ino != before.st_ino
+	testing.expect(t, closed_or_recycled)
+	if len(manager.fd_watchers) != 0 {
+		// Clean failure, not a teardown trap (which would skip the
+		// mutex unlock and hang the suite): the expects above
+		// already failed.
+		event_manager_fd_watcher_destroy(manager.fd_watchers[0])
+		posix.close(posix.FD(read_fd))
+	}
 }

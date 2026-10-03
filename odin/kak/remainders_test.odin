@@ -227,6 +227,7 @@ test_remainders_register_singleton :: proc(t: ^testing.T) {
 	register_manager_set(reg, &ctx, []string{"one", "two"})
 
 	vals := register_manager_get_strings("a", &ctx)
+	// get_strings returns owned clones (save semantics): free both.
 	defer {
 		for v in vals {
 			delete(v)

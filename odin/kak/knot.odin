@@ -1076,6 +1076,11 @@ Command_Manager :: struct {
 	commands:      map[string]Command_Manager_Command,
 	command_depth: int,
 	modules:       map[string]Command_Manager_Module,
+	// suppress_reports counts active try-guarded executions: while
+	// nonzero, commands_report and normal_fail stay silent (a caught
+	// failure must not pollute the status line; only the flag in
+	// Input_Handler records it for exec-abort purposes).
+	suppress_reports: int,
 	allocator:     mem.Allocator,
 }
 

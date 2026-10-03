@@ -238,8 +238,10 @@ word_db_remove_words :: proc(db: ^Word_DB, line: string, extra_word_chars: []run
 		assert(ok && info.refcount > 0)
 		info.refcount -= 1
 		if info.refcount == 0 {
-			delete(info.word, db.allocator)
+			// Remove the slot BEFORE freeing the key bytes:
+			// delete_key compares stored keys during probing.
 			delete_key(&db.words, word)
+			delete(info.word, db.allocator)
 		} else {
 			db.words[word] = info
 		}

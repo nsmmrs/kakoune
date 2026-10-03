@@ -5,16 +5,22 @@
 // mode filtering, urgent polling, and signal handlers.
 //
 // Parallelism note: `odin test` runs tests on worker threads, so each
-// test owns disjoint callback globals, and exactly one test proc
-// (event_manager_test_dispatch) ever installs the singleton.
+// test owns disjoint callback globals, and every test that installs
+// the singleton holds event_manager_test_singleton_mutex from setup
+// through teardown (the remote UI lifecycle test shares it).
 package kak
 
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 import "core:thread"
 import "core:time"
 import posix "core:sys/posix"
+
+// event_manager_test_singleton_mutex serializes singleton install and
+// teardown across tests (see the parallelism note above).
+event_manager_test_singleton_mutex: sync.Mutex
 
 // --- Disjoint callback state (one owner per global; see note above). ---
 
@@ -169,6 +175,9 @@ event_manager_test_signal_handler :: proc(t: ^testing.T) {
 // one proc so no two managers are ever installed at once.
 @(test)
 event_manager_test_dispatch :: proc(t: ^testing.T) {
+	sync.mutex_lock(&event_manager_test_singleton_mutex)
+	defer sync.mutex_unlock(&event_manager_test_singleton_mutex)
+
 	// Without a manager, urgent polling is a silent no-op.
 	testing.expect(t, !event_manager_has_instance())
 	handled, herr := event_manager_handle_urgent_events()

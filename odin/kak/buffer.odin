@@ -188,10 +188,9 @@ buffer_destroy :: proc(b: ^Buffer) {
 	delete(b.changes)
 	delete(b.filename, alloc)
 	delete(b.display_name, alloc)
-	for id in b.values {
-		v := b.values[id]
-		value_free(&v, alloc)
-	}
+	// Fifo-aware: an open fifo's watcher must unregister and its fd
+	// must close (~FifoWatcher), not just free the value payload.
+	buffer_utils_clear_values(b)
 	delete(b.values)
 
 	data := b.scope.data

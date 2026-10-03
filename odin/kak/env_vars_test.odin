@@ -3,7 +3,14 @@
 package kak
 
 import "core:os"
+import "core:sync"
 import "core:testing"
+
+// test_env_mutex serializes the tests that mutate the process
+// environment (libc getenv is MT-unsafe against a concurrent setenv
+// on another thread, so the writers must not overlap each other or
+// the env-reading tests that share this lock).
+test_env_mutex: sync.Mutex
 
 // Split at the first '=' only.
 @(test)
@@ -52,6 +59,8 @@ env_vars_test_split_edges :: proc(t: ^testing.T) {
 // get picks up the live environment, including a var set just for the test.
 @(test)
 env_vars_test_get_round_trip :: proc(t: ^testing.T) {
+	sync.mutex_lock(&test_env_mutex)
+	defer sync.mutex_unlock(&test_env_mutex)
 	os.set_env("KAK_ODIN_TEST_VAR", "kak-value=with=equals")
 	defer os.unset_env("KAK_ODIN_TEST_VAR")
 	m, err := env_vars_get()

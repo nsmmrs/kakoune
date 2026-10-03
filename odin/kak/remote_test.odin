@@ -5,6 +5,8 @@
 // hermetic socketpair tests (no live server).
 package kak
 
+import "core:mem"
+import "core:sync"
 import "core:testing"
 import posix "core:sys/posix"
 
@@ -751,4 +753,59 @@ remote_test_socketpair_disconnected :: proc(t: ^testing.T) {
 		Remote_Error.Disconnected,
 	)
 	posix.close(fds[1])
+}
+
+// a disconnected Remote_UI is destroyed exactly once through the
+// client path: the event callback closes the socket (like the server
+// loop observes before removing the client), then main_destroy_ui's
+// .Remote case unregisters the watcher and frees the struct, the
+// handle and the socket with no leaks
+@(test)
+remote_test_ui_disconnect_destroy :: proc(t: ^testing.T) {
+	sync.mutex_lock(&event_manager_test_singleton_mutex)
+	defer sync.mutex_unlock(&event_manager_test_singleton_mutex)
+
+	manager: Event_Manager
+	event_manager_init(&manager)
+	defer event_manager_destroy(&manager)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	alloc := mem.tracking_allocator(&track)
+
+	fds: [2]posix.FD
+	testing.expect_value(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds), posix.result.OK)
+	sock := int(fds[0])
+	// fds[0] moves to the Remote_UI; fds[1] is the peer client end.
+	ui := remote_ui_make(sock, Coord_Display{}, alloc)
+	watcher := ui.watcher
+	testing.expect_value(t, len(manager.fd_watchers), 1)
+	_, registered := remote_watcher_lookup(watcher)
+	testing.expect(t, registered)
+	testing.expect(t, user_interface_is_ok(ui.ui))
+
+	// The peer disconnects; the callback closes the socket and the UI
+	// reads not-ok, which is what makes the server loop remove the
+	// client (C++ ~RemoteUI's disconnect path).
+	posix.close(fds[1])
+	remote_ui_on_event(watcher, {.Read}, .Urgent)
+	testing.expect_value(t, watcher.fd, -1)
+	testing.expect(t, !user_interface_is_ok(ui.ui))
+	st: posix.stat_t
+	testing.expect(t, posix.fstat(posix.FD(sock), &st) != .OK)
+
+	// client_destroy funnels the handle here on the success path.
+	main_destroy_ui(ui.ui, .Remote, alloc)
+	testing.expect_value(t, len(manager.fd_watchers), 0)
+	_, still_registered := remote_watcher_lookup(watcher)
+	testing.expect(t, !still_registered)
+
+	// The registry map is process-global and this test is its only
+	// user, so drop it to stay hermetic (it was created above with
+	// the tracking allocator).
+	delete(remote_watcher_owners)
+	remote_watcher_owners = nil
+	testing.expect_value(t, len(track.allocation_map), 0)
+	testing.expect_value(t, len(track.bad_free_array), 0)
 }

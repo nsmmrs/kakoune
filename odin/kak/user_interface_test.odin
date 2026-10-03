@@ -98,11 +98,13 @@ user_interface_test_stub_refresh :: proc(data: rawptr, force: bool) {
 }
 
 user_interface_test_stub_set_on_key :: proc(data: rawptr, callback: User_Interface_On_Key_Callback) {
-	user_interface_test_stub(data).on_key = callback
+	stub := user_interface_test_stub(data)
+	stub.on_key = callback
 }
 
 user_interface_test_stub_set_on_paste :: proc(data: rawptr, callback: User_Interface_On_Paste_Callback) {
-	user_interface_test_stub(data).on_paste = callback
+	stub := user_interface_test_stub(data)
+	stub.on_paste = callback
 }
 
 user_interface_test_stub_set_ui_options :: proc(data: rawptr, options: User_Interface_Options) {
@@ -111,19 +113,21 @@ user_interface_test_stub_set_ui_options :: proc(data: rawptr, options: User_Inte
 
 user_interface_test_seen_key: Keys_Key
 user_interface_test_seen_key_count: int
+user_interface_test_seen_key_data: rawptr
 user_interface_test_seen_paste: string
 user_interface_test_seen_paste_count: int
+user_interface_test_seen_paste_data: rawptr
 
 user_interface_test_on_key :: proc(data: rawptr, key: Keys_Key) {
-	_ = data
 	user_interface_test_seen_key = key
 	user_interface_test_seen_key_count += 1
+	user_interface_test_seen_key_data = data
 }
 
 user_interface_test_on_paste :: proc(data: rawptr, content: string) {
-	_ = data
 	user_interface_test_seen_paste = content
 	user_interface_test_seen_paste_count += 1
+	user_interface_test_seen_paste_data = data
 }
 
 user_interface_test_vtable := User_Interface_VTable {
@@ -217,17 +221,21 @@ test_user_interface_callbacks :: proc(t: ^testing.T) {
 	ui := user_interface_make(&stub, &user_interface_test_vtable)
 
 	key := Keys_Key{modifiers = keys_MOD_CONTROL, key = 'c'}
-	user_interface_set_on_key(&ui, {user_interface_test_on_key, nil})
+	key_data := 7
+	user_interface_set_on_key(&ui, {user_interface_test_on_key, &key_data})
 	testing.expect(t, stub.on_key.call != nil)
 	stub.on_key.call(stub.on_key.data, key)
 	testing.expect_value(t, user_interface_test_seen_key_count, 1)
 	testing.expect_value(t, user_interface_test_seen_key, key)
+	testing.expect_value(t, user_interface_test_seen_key_data, rawptr(&key_data))
 
-	user_interface_set_on_paste(&ui, {user_interface_test_on_paste, nil})
+	paste_data := 9
+	user_interface_set_on_paste(&ui, {user_interface_test_on_paste, &paste_data})
 	testing.expect(t, stub.on_paste.call != nil)
 	stub.on_paste.call(stub.on_paste.data, "pasted")
 	testing.expect_value(t, user_interface_test_seen_paste_count, 1)
 	testing.expect_value(t, user_interface_test_seen_paste, "pasted")
+	testing.expect_value(t, user_interface_test_seen_paste_data, rawptr(&paste_data))
 
 	// A second UI over a distinct stub stays independent.
 	other := User_Interface_Test_Stub{ok = false}

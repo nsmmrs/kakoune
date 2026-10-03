@@ -807,11 +807,24 @@ buffer_utils_fifo_close :: proc(fifo: ^Buffer_Utils_Fifo_Watcher) {
 }
 
 // buffer_utils_clear_values frees every buffer value and empties the
-// map (port of ValueMap::clear()).
+// map (port of ValueMap::clear()). A live fifo value tears its
+// watcher down first (~FifoWatcher: the fd closes, the watcher
+// unregisters, the BufCloseFifo hook runs); repeat until the value
+// is gone so a hook re-arm is torn down too. Skips the fifo id
+// entirely until one is minted, so non-fifo buffers pay nothing.
 @(private)
 buffer_utils_clear_values :: proc(buf: ^Buffer) {
-	for id, &stored in buf.values {
-		_ = id
+	for buffer_utils_fifo_id_made {
+		id := buffer_utils_fifo_watcher_id
+		stored, ok := buf.values[id]
+		if !ok {
+			break
+		}
+		fifo, cast_err := value_as(stored, Buffer_Utils_Fifo_Watcher)
+		assert(cast_err == .None)
+		buffer_utils_fifo_close(fifo)
+	}
+	for _, &stored in buf.values {
 		value_free(&stored, buf.allocator)
 	}
 	clear(&buf.values)

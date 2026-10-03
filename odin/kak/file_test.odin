@@ -14,6 +14,7 @@ package kak
 import "core:c"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 import posix "core:sys/posix"
 
@@ -128,6 +129,8 @@ file_test_split_path :: proc(t: ^testing.T) {
 // fallbacks; homedir is non-empty in practice.
 @(test)
 file_test_tmpdir :: proc(t: ^testing.T) {
+	sync.mutex_lock(&test_env_mutex)
+	defer sync.mutex_unlock(&test_env_mutex)
 	raw := posix.getenv("TMPDIR")
 	got := file_tmpdir()
 	if raw == nil || len(string(raw)) == 0 {
@@ -156,6 +159,8 @@ file_test_tmpdir :: proc(t: ^testing.T) {
 
 @(test)
 file_test_homedir :: proc(t: ^testing.T) {
+	sync.mutex_lock(&test_env_mutex)
+	defer sync.mutex_unlock(&test_env_mutex)
 	testing.expect(t, len(file_homedir()) > 0)
 }
 

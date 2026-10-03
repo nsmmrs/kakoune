@@ -9,6 +9,7 @@ package kak
 
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 
 // main_test_free_strings releases an owned string list.
@@ -479,6 +480,8 @@ test_main_builtin_env_vars :: proc(t: ^testing.T) {
 
 @(test)
 test_main_env_simple_getters :: proc(t: ^testing.T) {
+	sync.mutex_lock(&test_env_mutex)
+	defer sync.mutex_unlock(&test_env_mutex)
 	// Getters that need no live editor state.
 	version := main_env_version("", nil, context.allocator)
 	testing.expect_value(t, len(version), 1)
@@ -504,6 +507,8 @@ test_main_env_simple_getters :: proc(t: ^testing.T) {
 
 @(test)
 test_main_directories :: proc(t: ^testing.T) {
+	sync.mutex_lock(&test_env_mutex)
+	defer sync.mutex_unlock(&test_env_mutex)
 	os.set_env("KAKOUNE_RUNTIME", "/tmp/kak-runtime")
 	dir := main_runtime_directory()
 	testing.expect_value(t, dir, "/tmp/kak-runtime")

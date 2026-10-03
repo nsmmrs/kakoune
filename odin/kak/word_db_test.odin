@@ -340,3 +340,32 @@ word_db_test_allocator_cleanup :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+// word_db_test_remove_words_drops_slots erases every indexed word and
+// requires the slots to be gone (no ghost entries).
+// Regression test: remove_words freed the key bytes before delete_key,
+// whose probing compares stored keys, so zero-refcount slots survived
+// with dangling keys.
+@(test)
+word_db_test_remove_words_drops_slots :: proc(t: ^testing.T) {
+	lines := []string{"alpha beta\n"}
+	buffer := word_db_test_make_buffer(lines)
+	defer buffer_destroy(buffer)
+	// Poison-on-free (see test_poison_allocator_proc) so a
+	// delete-before-delete_key regression fails deterministically.
+	poison_backing := context.allocator
+	poison := mem.Allocator{test_poison_allocator_proc, &poison_backing}
+	db := word_db_make(buffer, poison)
+	word_db_watch(&db)
+	defer word_db_destroy(&db)
+
+	testing.expect_value(t, word_db_get_word_occurences(&db, "alpha"), 1)
+	testing.expect_value(t, word_db_get_word_occurences(&db, "beta"), 1)
+	_, err := buffer_erase(buffer, Coord_Buffer{0, 0}, Coord_Buffer{0, 10})
+	testing.expect_value(t, err, Buffer_Error.None)
+	// find_matching refreshes the db (applying the erase) first.
+	res := word_db_find_matching(&db, "")
+	defer delete(res)
+	testing.expect_value(t, len(res), 0)
+	testing.expect_value(t, len(db.words), 0)
+}

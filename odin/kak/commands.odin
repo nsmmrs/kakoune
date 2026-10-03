@@ -194,6 +194,9 @@ commands_report :: proc(err: Commands_Error, msg: string, ctx: ^Context) {
 	if err == .None {
 		return
 	}
+	if command_manager_instance().suppress_reports > 0 {
+		return
+	}
 	face := Face{}
 	if f, ferr := face_registry_lookup(context_faces(ctx), "Error", ctx.allocator); ferr == .None {
 		face = f
@@ -492,6 +495,13 @@ commands_write_to_debug_buffer :: proc(
 	_, _ = buffer_insert(buf, buffer_end_coord(buf), content)
 }
 
+// commands_fifo_scroll maps the edit -scroll switch to the fifo
+// buffer's scroll mode (port of open_fifo's ternary: -scroll is Yes,
+// its absence is No; NotInitially is only for *stdin* buffers).
+commands_fifo_scroll :: proc(scroll: bool) -> Buffer_Utils_Auto_Scroll {
+	return .Yes if scroll else .No
+}
+
 // commands_open_fifo opens a named fifo for reading (C++ open_fifo).
 // The fd transfers to the fifo buffer.
 commands_open_fifo :: proc(
@@ -512,11 +522,7 @@ commands_open_fifo :: proc(
 		err, msg := commands_errorf("unable to open '{}'", {filename}, allocator)
 		return nil, err, msg
 	}
-	auto_scroll := Buffer_Utils_Auto_Scroll.Not_Initially
-	if scroll {
-		auto_scroll = .Yes
-	}
-	buf, ferr := buffer_utils_create_fifo_buffer(name, int(fd), flags, auto_scroll, allocator)
+	buf, ferr := buffer_utils_create_fifo_buffer(name, int(fd), flags, commands_fifo_scroll(scroll), allocator)
 	if ferr != .None || buf == nil {
 		posix.close(posix.FD(fd))
 		err, msg := commands_errorf("{}: {}", {filename, buffer_utils_error_message(ferr)}, allocator)
@@ -6022,6 +6028,9 @@ commands_try :: proc(
 			active = &error_ctx
 		}
 		if i == 0 || i < count - 1 {
+			// Guarded stage: a failure here is caught, so status
+			// reports from the nested execution stay silent.
+			m.suppress_reports += 1
 			exec_err, exec_msg := command_manager_execute(
 				m,
 				parameters_parser_positional(p, i),
@@ -6029,6 +6038,7 @@ commands_try :: proc(
 				active,
 				allocator,
 			)
+			m.suppress_reports -= 1
 			if exec_err == .None {
 				return .None, ""
 			}
@@ -6625,14 +6635,19 @@ commands_prompt_callback_call :: proc(
 		cmd = stored.on_abort
 	}
 	if prev, ok := stored.env_vars["text"]; ok {
+		old_key, found := "", false
 		for k in stored.env_vars {
 			if k == "text" {
-				delete(k, stored.allocator)
+				old_key, found = k, true
 				break
 			}
 		}
-		delete(prev, stored.allocator)
+		assert(found) // stored.env_vars["text"] succeeded above
+		// Remove the slot BEFORE freeing the key bytes:
+		// delete_key compares stored keys during probing.
 		delete_key(&stored.env_vars, "text")
+		delete(old_key, stored.allocator)
+		delete(prev, stored.allocator)
 	}
 	key := strings.clone("text", stored.allocator)
 	stored.env_vars[key] = strings.clone(text, stored.allocator)
@@ -6644,9 +6659,11 @@ commands_prompt_callback_call :: proc(
 		&sc,
 		ctx.allocator,
 	)
-	delete(stored.env_vars["text"], stored.allocator)
-	delete(key, stored.allocator)
+	val := stored.env_vars["text"]
+	// Remove the slot BEFORE freeing the key bytes (see above).
 	delete_key(&stored.env_vars, "text")
+	delete(val, stored.allocator)
+	delete(key, stored.allocator)
 	// C++ prompt callback boundary: kill_session unwinds silently
 	// (no report, no hook); other failures report and run
 	// RuntimeError. The error message is owned here.

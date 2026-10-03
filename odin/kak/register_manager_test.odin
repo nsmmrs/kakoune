@@ -139,6 +139,37 @@ register_manager_test_save_restore :: proc(t: ^testing.T) {
 	testing.expect_value(t, got[0], "p")
 }
 
+// set clones its values and save returns owned clones: freeing the
+// caller's strings after the set leaves register content intact, and
+// destroy frees exactly the clones (self-referential set-register
+// must neither dangle nor double-free)
+@(test)
+register_manager_test_set_clones_values :: proc(t: ^testing.T) {
+	reg := register_manager_make_static("a")
+	defer register_manager_destroy_register(reg)
+	register_manager_test_disable_hooks(reg)
+
+	owned := strings.clone("v1")
+	register_manager_set(reg, nil, {owned})
+	delete(owned)
+	got := register_manager_get_values(reg, nil)
+	testing.expect_value(t, len(got), 1)
+	testing.expect_value(t, got[0], "v1")
+
+	owned2 := strings.clone("v2")
+	register_manager_set(reg, nil, {owned2})
+	delete(owned2)
+	saved := register_manager_save(reg, nil)
+	defer {
+		for s in saved {
+			delete(s)
+		}
+		delete(saved)
+	}
+	testing.expect_value(t, len(saved), 1)
+	testing.expect_value(t, saved[0], "v2")
+}
+
 @(test)
 register_manager_test_history_order :: proc(t: ^testing.T) {
 	reg := register_manager_make_history("/")

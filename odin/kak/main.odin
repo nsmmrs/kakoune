@@ -59,13 +59,18 @@ main_error_message :: proc(err: Main_Error, allocator := context.allocator) -> s
 	unreachable()
 }
 
-// Main_UI_Type selects the local user interface (C++ UIType).
+// Main_UI_Type selects the local user interface (C++ UIType), plus
+// the server-side UI of an accepted remote client. A Remote handle
+// is built by remote_ui_make and destroyed by remote_ui_destroy via
+// main_destroy_ui, mirroring the C++ Client's UniquePtr<UserInterface>
+// owning its RemoteUI.
 Main_UI_Type :: enum {
 	// Dummy first: the zero value must mean "opaque handle, plain
 	// free" so zero-initialized Clients destroy safely.
 	Dummy,
 	Terminal,
 	Json,
+	Remote,
 }
 
 // main_parse_ui_type maps a -ui name to a UI type (C++ parse_ui_type).
@@ -1344,6 +1349,10 @@ main_make_ui :: proc(ui_type: Main_UI_Type, allocator := context.allocator) -> ^
 		return json_ui_make_ui(allocator)
 	case .Dummy:
 		return main_make_dummy_ui(allocator)
+	case .Remote:
+		// Remote UIs wrap an accepted socket and are built by
+		// remote_ui_make, never here.
+		unreachable()
 	}
 	unreachable()
 }
@@ -1357,6 +1366,11 @@ main_destroy_ui :: proc(ui: ^User_Interface, ui_type: Main_UI_Type, allocator :=
 		json_ui_destroy_ui(ui, allocator)
 	case .Dummy:
 		free(ui, allocator)
+	case .Remote:
+		// The handle's data is the owning Remote_UI (see
+		// remote_ui_make); the destroy frees the handle too, so
+		// the passed allocator is unused on this path.
+		remote_ui_destroy((^Remote_UI)(ui.data))
 	}
 }
 

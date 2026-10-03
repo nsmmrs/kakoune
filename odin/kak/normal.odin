@@ -103,6 +103,9 @@ normal_fail :: proc(ctx: ^Context, msg: string, kind: Input_Handler_Key_Error_Ki
 	if ctx.client == nil {
 		return
 	}
+	if command_manager_instance().suppress_reports > 0 {
+		return
+	}
 	// Atoms use context.allocator (client_display_line_destroy deletes
 	// them with it); atom text is borrowed, like the C++ StringView.
 	prompt := client_display_line_from_text("", Face{})

@@ -3133,3 +3133,83 @@ test_commands_fail_call_propagates :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Commands_Error.Fail)
 	testing.expect_value(t, msg, "boom")
 }
+
+// edit -fifo without -scroll reads with AutoScroll::No (C++
+// open_fifo's ternary); NotInitially would append a spurious
+// trailing newline to newline-terminated first reads
+@(test)
+test_commands_fifo_scroll :: proc(t: ^testing.T) {
+	testing.expect_value(t, commands_fifo_scroll(false), Buffer_Utils_Auto_Scroll.No)
+	testing.expect_value(t, commands_fifo_scroll(true), Buffer_Utils_Auto_Scroll.Yes)
+}
+
+// test_poison_allocator_proc wraps a backing allocator and poisons
+// freed blocks, making use-after-free reads deterministic (the plain
+// test allocator leaves freed bytes intact, hiding delete-before-
+// remove bugs that glibc's freelist metadata exposes in production).
+test_poison_allocator_proc :: proc(
+	allocator_data: rawptr,
+	mode: mem.Allocator_Mode,
+	size, alignment: int,
+	old_memory: rawptr,
+	old_size: int,
+	location := #caller_location,
+) -> ([]byte, mem.Allocator_Error) {
+	backing := (^mem.Allocator)(allocator_data)^
+	if mode == .Free && old_memory != nil && old_size > 0 {
+		poison := ([^]byte)(old_memory)[:old_size]
+		for &b in poison {
+			b = 0xDD
+		}
+	}
+	return backing.procedure(backing.data, mode, size, alignment, old_memory, old_size, location)
+}
+
+// test_commands_prompt_callback_text_removed validates the prompt
+// callback "text" dance: after each call the temporary text entry is
+// gone (no ghost slot) and destroy frees everything exactly once.
+// Regression test: the cleanup freed the key bytes before delete_key,
+// whose probing compares stored keys, so the slot survived with
+// dangling pointers and destroy double-freed them ("free(): invalid
+// pointer" on prompt validation).
+@(test)
+test_commands_prompt_callback_text_removed :: proc(t: ^testing.T) {
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	// Pin a fixture-parented local scope so command_manager_execute
+	// never falls back to the shared global singleton.
+	exec_local := scope_local_make(&ctx, &buf.scope, f.allocator)
+	defer scope_local_destroy(exec_local, f.allocator)
+
+	// Poison-on-free for the callback's own allocations so a
+	// delete-before-delete_key regression fails deterministically.
+	poison_backing := f.allocator
+	poison := mem.Allocator{test_poison_allocator_proc, &poison_backing}
+	stored := new(Commands_Prompt_Callback, f.allocator)
+	stored^ = Commands_Prompt_Callback{
+		command   = strings.clone("nop", f.allocator),
+		on_change = strings.clone("", f.allocator),
+		on_abort  = strings.clone("", f.allocator),
+		params    = make([dynamic]string, 0, f.allocator),
+		env_vars  = make(Env_Var_Map, 2, f.allocator),
+		allocator = poison,
+	}
+	stored.env_vars[strings.clone("count", f.allocator)] = strings.clone("0", f.allocator)
+	// Validate twice: the second call exercises the pre-cleanup path.
+	commands_prompt_callback_call(stored, "bar", .Validate, &ctx)
+	testing.expect_value(t, len(stored.env_vars), 1)
+	_, has_text := stored.env_vars["text"]
+	testing.expect(t, !has_text)
+	commands_prompt_callback_call(stored, "baz", .Validate, &ctx)
+	testing.expect_value(t, len(stored.env_vars), 1)
+	_, has_text_again := stored.env_vars["text"]
+	testing.expect(t, !has_text_again)
+	commands_prompt_callback_destroy(stored, f.allocator)
+}

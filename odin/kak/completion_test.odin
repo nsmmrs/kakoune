@@ -2,6 +2,7 @@ package kak
 
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 import posix "core:sys/posix"
 
@@ -301,6 +302,8 @@ completion_test_command_dirname :: proc(t: ^testing.T) {
 
 @(test)
 completion_test_command_path :: proc(t: ^testing.T) {
+	sync.mutex_lock(&test_env_mutex)
+	defer sync.mutex_unlock(&test_env_mutex)
 	dir := completion_test_scratch(t, "kak_completion_test_path")
 	exe := strings.concatenate({dir, "/zz_mycmd_12345"}, context.temp_allocator)
 	testing.expect_value(t, file_write_to_file(exe, "x"), File_Error.None)

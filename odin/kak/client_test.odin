@@ -713,3 +713,89 @@ client_test_busy_indicator_lifecycle :: proc(t: ^testing.T) {
 	_, still_registered := client_busy_entries[&bi.timer]
 	testing.expect(t, !still_registered)
 }
+
+// client_make installs the UI key/paste callbacks with the client
+// as callback data, so UI-dispatched keys land in the client's
+// pending queue (port of the set_on_key/set_on_paste closures in
+// the C++ constructor)
+@(test)
+client_test_make_wires_ui_callbacks :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	// client_make reads ui_options through the window chain.
+	reg := scope_global_option_registry(f.global)
+	if !option_manager_registry_exists(reg, "ui_options") {
+		_, _ = option_manager_registry_declare(reg, "ui_options", "", map[string]string{})
+	}
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	window := window_make(buf, f.allocator)
+	// Unwind client_make's window ties before teardown (mirrors
+	// client_destroy's unregister; destroy_client skips the window).
+	defer window_destroy(window)
+	sels := selection_list_make_single(buf, Selection{}, buffer_timestamp(buf), f.allocator)
+	st := new(User_Interface_Test_Stub, f.allocator)
+	st.ok = true
+	ui := new(User_Interface, f.allocator)
+	ui^ = user_interface_make(st, &user_interface_test_vtable)
+	c := client_make(ui, .Dummy, window, sels, 0, nil, "c1", {}, f.allocator)
+	selection_list_destroy(&sels)
+
+	testing.expect(t, st.on_key.call != nil)
+	testing.expect(t, st.on_paste.call != nil)
+	testing.expect_value(t, st.on_key.data, rawptr(c))
+	testing.expect_value(t, st.on_paste.data, rawptr(c))
+	st.on_key.call(st.on_key.data, Keys_Key{key = 'j'})
+	testing.expect_value(t, len(c.pending_keys), 1)
+	testing.expect_value(t, c.pending_keys[0], Keys_Key{key = 'j'})
+
+	// Fixture teardown frees the client (mirrors make_client).
+	option_manager_unregister_watcher(&window.data.options, client_option_watcher(c))
+	append(&f.clients.clients, c)
+}
+
+// client_test_redraw_menu_info_show_frees_scratch drives the
+// Menu_Show/Info_Show paths of client_redraw_ifn. The wrapped choice
+// slices must be allocated and freed with the same allocator.
+// Regression test: the wrappers were built with
+// context.temp_allocator but released with a plain delete (heap free
+// of arena memory), aborting redraw with "free(): invalid pointer"
+// as soon as a completion menu showed through the real server loop.
+@(test)
+client_test_redraw_menu_info_show_frees_scratch :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	reg := scope_global_option_registry(f.global)
+	if !option_manager_registry_exists(reg, "ui_options") {
+		_, _ = option_manager_registry_declare(reg, "ui_options", "", map[string]string{})
+	}
+	if !option_manager_registry_exists(reg, "modelinefmt") {
+		_, _ = option_manager_registry_declare(reg, "modelinefmt", "", "test-modeline")
+	}
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	window := window_make(buf, f.allocator)
+	defer window_destroy(window)
+	sels := selection_list_make_single(buf, Selection{}, buffer_timestamp(buf), f.allocator)
+	st := new(User_Interface_Test_Stub, f.allocator)
+	st.ok = true
+	ui := new(User_Interface, f.allocator)
+	ui^ = user_interface_make(st, &user_interface_test_vtable)
+	c := client_make(ui, .Dummy, window, sels, 0, nil, "c1", {}, f.allocator)
+	selection_list_destroy(&sels)
+
+	choices := make([dynamic]Display_Line, f.allocator)
+	append(&choices, Display_Line{})
+	client_menu_show(c, choices, Coord_Buffer{}, .Prompt)
+	content := make(Display_Line_List, f.allocator)
+	append(&content, Display_Line{})
+	client_info_show(c, Display_Line{}, content, Coord_Buffer{}, .Prompt)
+	client_redraw_ifn(c)
+
+	testing.expect(t, st.menu_shown)
+	testing.expect_value(t, st.menu_choices, 1)
+	testing.expect(t, st.info_shown)
+	testing.expect_value(t, st.info_lines, 1)
+	testing.expect(t, card(c.ui_pending) == 0)
+
+	option_manager_unregister_watcher(&window.data.options, client_option_watcher(c))
+	append(&f.clients.clients, c)
+}

@@ -29,16 +29,16 @@
 // (atom text is owned here, unlike display_buffer_line_destroy's
 // borrowed convention), maps with env_vars_free. Remote_Client.ui is
 // borrowed. Remote_UI owns its watcher, reader, send buffer and the
-// ui handle; the ui handle is freed by client_destroy while the
-// Remote_UI itself needs remote_ui_destroy. Sockets held by watchers
-// are closed exactly where the C++ closes them (close_fd call sites);
+// ui handle; the whole struct is released by remote_ui_destroy, which
+// client_destroy reaches through main_destroy_ui's .Remote case (like
+// the C++ Client owning its RemoteUI). Sockets held by watchers are
+// closed exactly where the C++ closes them (close_fd call sites);
 // destroying a watcher never closes, matching ~FDWatcher.
 //
 // Event callbacks are plain procs (no closures), so watchers are
 // linked to their owners through the remote_watcher_owners registry.
-// Remote_Client additionally needs a process-level trampoline for the
-// UI on_key/on_paste callbacks, which carry no user data: there is at
-// most one RemoteClient per (client) process, like the C++.
+// UI on_key/on_paste callbacks carry their owner through the
+// callback struct's data field (the C++ closure capture).
 //
 // Deviations: connect failures close the just-opened socket (the C++
 // leaks it). Unknown bits in a wire Face's attributes are dropped.
@@ -1030,17 +1030,18 @@ remote_watcher_lookup :: proc(w: ^Event_Manager_Fd_Watcher) -> (Remote_Watcher_O
 // RemoteUI): a User_Interface implementation that forwards draws to
 // the socket and feeds received keys into the client. Create with
 // remote_ui_make, release with remote_ui_destroy. The ui handle is
-// handed to client_manager_create_client and freed by client_destroy.
+// handed to client_manager_create_client with .Remote, so the
+// client's destroy funnels back here through main_destroy_ui.
 Remote_UI :: struct {
-	watcher:     ^Event_Manager_Fd_Watcher,
-	reader:      Remote_Msg_Reader,
-	ancillary:   Maybe(int),
-	dimensions:  Coord_Display,
+	watcher:       ^Event_Manager_Fd_Watcher,
+	reader:        Remote_Msg_Reader,
+	ancillary:     Maybe(int),
+	dimensions:    Coord_Display,
 	on_key:      User_Interface_On_Key_Callback,
 	on_paste:    User_Interface_On_Paste_Callback,
 	send_buffer: Remote_Buffer,
-	ui:          ^User_Interface,
-	allocator:   mem.Allocator,
+	ui:            ^User_Interface,
+	allocator:     mem.Allocator,
 }
 
 // remote_ui_make builds a server-side UI around an accepted socket.
@@ -1061,9 +1062,10 @@ remote_ui_make :: proc(sock: int, dimensions: Coord_Display, allocator := contex
 }
 
 // remote_ui_destroy releases a Remote_UI. Remaining send data is
-// flushed best-effort first, like ~RemoteUI. The ui handle is freed
-// here unless client_destroy already freed it; exactly one of the
-// two must run.
+// flushed best-effort first, like ~RemoteUI. The ui handle is always
+// freed here; exactly one destroy runs per Remote_UI: the accepter
+// failure path calls this directly, while the success path funnels
+// client_destroy through main_destroy_ui's .Remote case.
 remote_ui_destroy :: proc(ui: ^Remote_UI) {
 	context.allocator = ui.allocator
 	if ui.watcher.fd != -1 {
@@ -1338,12 +1340,6 @@ Remote_Client_Socket :: struct {
 	allocator: mem.Allocator,
 }
 
-// remote_client_current is the process's RemoteClient, if any. The
-// merged UI callbacks carry no user data, so the on_key/on_paste
-// trampolines reach the client through this (there is at most one
-// RemoteClient per client process, like the C++).
-remote_client_current: ^Remote_Client
-
 // remote_client_init connects a Remote_Client to a session and sends
 // the Connect handshake (port of RemoteClient::RemoteClient). ui is
 // borrowed; env_vars is borrowed for the handshake. stdin_fd, when
@@ -1391,9 +1387,8 @@ remote_client_init :: proc(
 	c.socket_watcher = new(Event_Manager_Fd_Watcher, allocator)
 	event_manager_fd_watcher_init(c.socket_watcher, sock, {.Read, .Write}, .Urgent, remote_client_on_event)
 	remote_watcher_register(c.socket_watcher, .Client, state, allocator)
-	user_interface_set_on_key(ui, {remote_client_ui_on_key, nil})
-	user_interface_set_on_paste(ui, {remote_client_ui_on_paste, nil})
-	remote_client_current = c
+	user_interface_set_on_key(ui, {remote_client_ui_on_key, c})
+	user_interface_set_on_paste(ui, {remote_client_ui_on_paste, c})
 	return .None
 }
 
@@ -1416,9 +1411,6 @@ remote_client_destroy :: proc(c: ^Remote_Client) {
 	}
 	delete(c.send_buffer)
 	c.send_buffer = nil
-	if remote_client_current == c {
-		remote_client_current = nil
-	}
 }
 
 // remote_client_is_ui_ok reports whether the client's UI is usable
@@ -1428,10 +1420,9 @@ remote_client_is_ui_ok :: proc(c: ^Remote_Client) -> bool {
 }
 
 // remote_client_ui_on_key forwards a locally pressed key to the
-// server (the UI on_key trampoline through remote_client_current).
+// server (the UI on_key trampoline; data is the Remote_Client).
 remote_client_ui_on_key :: proc(data: rawptr, key: Keys_Key) {
-	_ = data
-	c := remote_client_current
+	c := (^Remote_Client)(data)
 	if c == nil || c.socket_watcher == nil {
 		return
 	}
@@ -1442,10 +1433,9 @@ remote_client_ui_on_key :: proc(data: rawptr, key: Keys_Key) {
 }
 
 // remote_client_ui_on_paste forwards locally pasted text to the
-// server (the UI on_paste trampoline through remote_client_current).
+// server (the UI on_paste trampoline; data is the Remote_Client).
 remote_client_ui_on_paste :: proc(data: rawptr, content: string) {
-	_ = data
-	c := remote_client_current
+	c := (^Remote_Client)(data)
 	if c == nil || c.socket_watcher == nil {
 		return
 	}
@@ -2033,10 +2023,10 @@ remote_accepter_handle_connect :: proc(a: ^Remote_Accepter, s: ^Server, sock: in
 	}
 	ui := remote_ui_make(sock, dimensions, s.allocator)
 	on_exit := Client_On_Exit_Callback{call = remote_ui_on_client_exit, data = ui}
-	// .Dummy destroys the handle opaquely (plain free): the Remote_UI
-	// itself is owned by the disconnect path, not the client.
+	// .Remote destroys through remote_ui_destroy: the client owns the
+	// Remote_UI, like the C++ Client owning its RemoteUI.
 	_, create_err := client_manager_create_client(
-		client_manager_instance(), ui.ui, .Dummy, int(pid), name, Env_Var_Map(env_vars), init_cmds, "", init_coord, on_exit,
+		client_manager_instance(), ui.ui, .Remote, int(pid), name, Env_Var_Map(env_vars), init_cmds, "", init_coord, on_exit,
 	)
 	if create_err != .None {
 		remote_ui_destroy(ui)
