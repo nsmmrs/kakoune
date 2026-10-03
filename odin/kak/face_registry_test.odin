@@ -414,3 +414,54 @@ face_registry_test_flatten :: proc(t: ^testing.T) {
 	testing.expect(t, by_name["ChildOnly"].fg == color_from_named(.Green), "child-only face must appear")
 	testing.expect(t, by_name["Error"].bg == color_from_named(.Red), "parent-only face must appear")
 }
+
+@(test)
+face_registry_test_remove_repeated_no_ghost :: proc(t: ^testing.T) {
+	// Regression (difftest3): remove used to free the key bytes before
+	// delete_key, so the removal probe could read freed memory and
+	// leave a ghost entry; repeated add/remove cycles corrupted the
+	// heap. Cycle a full registry several times.
+	reg := face_registry_make()
+	defer face_registry_destroy(&reg)
+	names := [12]string{
+		"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta",
+		"Eta", "Theta", "Iota", "Kappa", "Lambda", "Mu",
+	}
+	for n in names {
+		testing.expect_value(t, face_registry_add(&reg, n, "red"), Face_Registry_Error.None)
+	}
+	for _ in 0 ..< 5 {
+		for n in names {
+			face_registry_remove(&reg, n)
+			_, found := reg.faces[n]
+			testing.expect(t, !found, "removed face must be gone")
+		}
+		for n in names {
+			testing.expect_value(t, face_registry_add(&reg, n, "red"), Face_Registry_Error.None)
+		}
+	}
+	face, err := face_registry_lookup(&reg, "Gamma")
+	testing.expect_value(t, err, Face_Registry_Error.None)
+	testing.expect(t, face.fg == color_from_named(.Red), "cycled registry must resolve")
+}
+
+@(test)
+face_registry_test_high_byte_names_rejected :: proc(t: ^testing.T) {
+	// Like the C++ (is_word over signed bytes), high bytes are never
+	// word characters: names are invalid and descriptions fall
+	// through to color parsing, which rejects them. (difftest3)
+	reg := face_registry_make()
+	defer face_registry_destroy(&reg)
+	testing.expect_value(
+		t,
+		face_registry_add(&reg, "Gp\xce", "red"),
+		Face_Registry_Error.Invalid_Name,
+	)
+	testing.expect_value(
+		t,
+		face_registry_add(&reg, "\xbc", "red"),
+		Face_Registry_Error.Invalid_Name,
+	)
+	_, err := face_registry_parse("n2z4K0\xc3")
+	testing.expect(t, err != Face_Registry_Error.None, "high-byte desc must not parse as base")
+}

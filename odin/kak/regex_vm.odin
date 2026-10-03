@@ -15,9 +15,9 @@
 // -1 marks an unmatched save.
 //
 // Fidelity notes vs the C++ implementation:
-//   - \d matches ASCII digits plus core:unicode numbers (C++ uses
-//     locale-dependent iswdigit); \w uses unicode_is_word, so non-ASCII
-//     alphanumerics come from core:unicode tables rather than iswalnum.
+//   - \d matches ASCII digits only (C++ iswdigit has no non-ASCII members
+//     in UTF-8 locales, verified exhaustively); \w uses unicode_is_word,
+//     whose wide path mirrors glibc iswalnum exactly (same verification).
 //   - Instruction deduplication marks live in the VM, not on the
 //     program (the C++ mutates CompiledRegex.last_step during exec),
 //     so one program can back several VMs. Behavior is identical.
@@ -26,7 +26,6 @@ package kak
 import "core:mem"
 import "core:slice"
 import "core:strings"
-import "core:unicode"
 
 // Regex_Vm_Error reports compilation failures. Zero value None is success;
 // detail is carried by the message string returned next to the error.
@@ -257,10 +256,9 @@ regex_vm_is_word :: proc(cp: rune) -> bool {
 // regex_vm_is_digit reports whether cp is a decimal digit: ASCII 0-9, or a
 // Unicode number above ASCII (C++ uses locale-dependent iswdigit).
 regex_vm_is_digit :: proc(cp: rune) -> bool {
-	if cp < 128 {
-		return cp >= '0' && cp <= '9'
-	}
-	return unicode.is_number(cp)
+	// C++ iswdigit has no non-ASCII members in UTF-8 locales
+	// (verified by exhaustive probing of glibc en_US.utf8).
+	return cp >= '0' && cp <= '9'
 }
 
 // regex_vm_is_ctype reports whether cp matches any of the type bits in ct
@@ -470,19 +468,11 @@ regex_vm_parser_fail_invalid :: proc(p: ^Regex_Vm_Parser) {
 }
 
 // regex_vm_parser_decode decodes the codepoint at byte offset pos without
-// moving the cursor. Like the C++ throwing iterator, only lead-byte class
-// and truncation are validated; continuation bytes are masked blindly.
+// moving the cursor. Like the C++, orphan high bytes and truncated
+// sequences decode leniently (the multibyte path drops the throwing
+// policy); only end-of-input dereferences throw, handled by callers.
 @(private = "file")
 regex_vm_parser_decode :: proc(p: ^Regex_Vm_Parser, pos: int) -> rune {
-	lead := p.pattern[pos]
-	if lead & 0x80 == 0 {
-		return rune(lead)
-	}
-	size := utf8_codepoint_size_byte(lead)
-	if size == 1 || pos + size > len(p.pattern) {
-		regex_vm_parser_fail_invalid(p)
-		return -1
-	}
 	q := pos
 	return utf8_read_codepoint(p.pattern, &q)
 }
@@ -1463,6 +1453,9 @@ regex_vm_compiler_compile_node_inner :: proc(c: ^Regex_Vm_Compiler, index: int, 
 		if ignore_case {
 			cp = unicode_to_lower(cp)
 		}
+		// The C++ stores the codepoint in a 24-bit field; orphan bytes
+		// (0xFFFFFFxx) truncate to 0xFFFFxx and can never match.
+		cp = rune(u32(cp) & 0xFFFFFF)
 		regex_vm_compiler_push_inst(c, .Literal, Regex_Vm_Literal{cp, ignore_case})
 	case .Any_Char:
 		regex_vm_compiler_push_inst(c, .Any_Char)
@@ -1471,7 +1464,7 @@ regex_vm_compiler_compile_node_inner :: proc(c: ^Regex_Vm_Compiler, index: int, 
 	case .Char_Class:
 		char_class := c.parsed.char_classes[node.value]
 		if len(char_class.ranges) == 1 && char_class.ctypes == {} &&
-		   char_class.ranges[0].max <= 0xFF {
+		   u32(char_class.ranges[0].max) <= 0xFF {
 			regex_vm_compiler_push_inst(
 				c,
 				.Char_Range,
@@ -1648,7 +1641,7 @@ regex_vm_compiler_start_desc_node :: proc(
 	node := c.parsed.nodes[index]
 	switch node.op {
 	case .Literal:
-		if node.value < 128 {
+		if u32(node.value) < 128 {
 			if node.ignore_case {
 				desc.bytes[unicode_to_lower(rune(node.value))] = true
 				desc.bytes[unicode_to_upper(rune(node.value))] = true

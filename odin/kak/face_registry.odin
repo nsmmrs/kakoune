@@ -162,12 +162,14 @@ face_registry_reparent :: proc(reg: ^Face_Registry, parent: ^Face_Registry) {
 
 // face_registry_is_word_str reports whether every byte of s is a
 // word character (port of the all_of/is_word checks; like the C++,
-// the empty string passes).
+// the empty string passes). Bytes convert through i8 like the C++
+// char-to-Codepoint conversion, so high bytes are negative and never
+// word characters.
 @(private = "file")
 face_registry_is_word_str :: proc(s: string) -> bool {
 	underscore := [1]rune{'_'}
 	for i := 0; i < len(s); i += 1 {
-		if !unicode_is_word(rune(s[i]), underscore[:]) {
+		if !unicode_is_word(rune(i8(s[i])), underscore[:]) {
 			return false
 		}
 	}
@@ -457,13 +459,21 @@ face_registry_remove :: proc(reg: ^Face_Registry, name: string) {
 		return
 	}
 	delete(spec.base, reg.allocator)
+	// Capture the stored key, then remove the slot BEFORE freeing the
+	// key bytes: delete_key compares stored keys during probing, so
+	// freeing first reads freed memory and can leave a ghost entry.
+	// (The removal happens outside the loop: mutating during iteration
+	// is not allowed.)
+	stored_key, found := "", false
 	for key in reg.faces {
 		if key == name {
-			delete(key, reg.allocator)
+			stored_key, found = key, true
 			break
 		}
 	}
+	assert(found) // reg.faces[name] succeeded above
 	delete_key(&reg.faces, name)
+	delete(stored_key, reg.allocator)
 }
 
 // face_registry_flatten lists the visible faces from the three scope

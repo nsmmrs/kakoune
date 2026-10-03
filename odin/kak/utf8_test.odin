@@ -220,3 +220,22 @@ utf8_test_dump_invalid :: proc(t: ^testing.T) {
 	testing.expect_value(t, utf8_dump(rune(-1), buf[:]), 1)
 	testing.expect_value(t, buf[0], byte(0xFF))
 }
+
+@(test)
+utf8_test_character_start :: proc(t: ^testing.T) {
+	// End of string is a stop like the C++ (it reads the NUL
+	// terminator there, which is a character start). Regression:
+	// difftest3 found pos == len backing into the string.
+	testing.expect_value(t, utf8_character_start("a\xc3\xa9\xe2\x82\xac", 6), 6)
+	testing.expect_value(t, utf8_character_start("YST", 3), 3)
+	testing.expect_value(t, utf8_character_start("", 0), 0)
+	testing.expect_value(t, utf8_character_start("ab", 9), 2)
+	// Inside a multibyte char backs up to its first byte.
+	testing.expect_value(t, utf8_character_start("a\xc3\xa9\xe2\x82\xac", 2), 1)
+	testing.expect_value(t, utf8_character_start("a\xc3\xa9\xe2\x82\xac", 4), 3)
+	testing.expect_value(t, utf8_character_start("a\xc3\xa9\xe2\x82\xac", 5), 3)
+	testing.expect_value(t, utf8_character_start("a\xc3\xa9\xe2\x82\xac", 1), 1)
+	// Orphan continuation bytes are skipped like the C++.
+	testing.expect_value(t, utf8_character_start("\x80\x81", 2), 2)
+	testing.expect_value(t, utf8_character_start("\x80\x81", 1), 0)
+}

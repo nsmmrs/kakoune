@@ -178,3 +178,35 @@ regex_test_iterator :: proc(t: ^testing.T) {
 	testing.expect_value(t, regex_match_results_substring(&it4.results, subject, 0), "1")
 	testing.expect(t, !regex_iterator_next(&it4))
 }
+
+@(test)
+regex_test_invalid_utf8_lenient :: proc(t: ^testing.T) {
+	// Like the C++ (whose multibyte path drops the throwing policy),
+	// orphan high bytes and truncated sequences compile instead of
+	// erroring. The orphan literal truncates to 24 bits and can never
+	// match, like the C++. (difftest3)
+	re, msg, err := regex_make("\x8d")
+	defer regex_destroy(&re)
+	testing.expect_value(t, err, Regex_Error.None)
+	delete(msg)
+	testing.expect(t, !regex_match_simple("\x8d", &re), "orphan literal must not match")
+
+	// Truncated sequences compile too (C++ never forwards the throwing
+	// policy into the multibyte decoder; only end-of-input throws).
+	ret, msgt, errt := regex_make("\xc3")
+	defer regex_destroy(&ret)
+	testing.expect_value(t, errt, Regex_Error.None)
+	delete(msgt)
+
+	// ...but byte-based advance still lands on the '(' here, so the
+	// group is unclosed exactly like the C++ reports.
+	re2, msg2, err2 := regex_make("x\xc3(")
+	defer regex_destroy(&re2)
+	testing.expect_value(t, err2, Regex_Error.Compile_Error)
+	delete(msg2)
+
+	re3 := regex_test_make(t, `(?i)x[a\w]`)
+	defer regex_destroy(&re3)
+	testing.expect(t, !regex_match_simple("x\xbc", &re3), "(?i) class must not match orphan byte")
+	testing.expect(t, regex_match_simple("xa", &re3), "(?i) class still matches ASCII")
+}

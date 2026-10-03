@@ -193,7 +193,9 @@ utf8_character_start :: proc(s: string, pos: int) -> int {
 	if p > len(s) {
 		p = len(s)
 	}
-	for p > 0 && (p == len(s) || !utf8_is_character_start(s[p])) {
+	// Like the C++, pos == len(s) is a stop: dereferencing the end
+	// reads the NUL terminator, which is a character start.
+	for p > 0 && p < len(s) && !utf8_is_character_start(s[p]) {
 		p -= 1
 	}
 	return p

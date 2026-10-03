@@ -99,12 +99,20 @@ unicode_test_is_word_unicode :: proc(t: ^testing.T) {
 	testing.expect(t, unicode_is_word('Σ', underscore))
 	// Decimal digits beyond ASCII count as alphanumerics.
 	testing.expect(t, unicode_is_word(0x0660, underscore)) // Arabic-Indic 0
-	testing.expect(t, unicode_is_word('²', underscore)) // No: still a number
 	testing.expect(t, unicode_is_word(0x2167, underscore)) // Roman numeral VIII
+	// ...but other numbers (No) do not: glibc iswalnum excludes them.
+	testing.expect(t, !unicode_is_word('²', underscore)) // superscript two
+	testing.expect(t, !unicode_is_word('¹', underscore)) // superscript one
+	testing.expect(t, !unicode_is_word('¼', underscore)) // vulgar fraction
+	// Letter-like marks count; generic diacritics do not (difftest3).
+	testing.expect(t, unicode_is_word(0x0345, underscore)) // ypogegrammeni
+	testing.expect(t, unicode_is_word(0x05B0, underscore)) // Hebrew point sheva
+	testing.expect(t, !unicode_is_word(0x0300, underscore)) // combining grave
 	// Symbols, marks, and punctuation are not word characters.
 	testing.expect(t, !unicode_is_word('€', underscore))
 	testing.expect(t, !unicode_is_word(0x1F600, underscore)) // emoji
 	testing.expect(t, !unicode_is_word(0x0301, underscore)) // combining mark
+	testing.expect(t, !unicode_is_word(0xD800, underscore)) // surrogate
 	testing.expect(t, !unicode_is_word('.', underscore))
 	// Non-ASCII extra word chars are honored.
 	extra := []rune{'€'}

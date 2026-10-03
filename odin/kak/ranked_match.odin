@@ -77,17 +77,10 @@ ranked_match_matches :: proc(query, letters: Ranked_Match_Used_Letters) -> bool 
 	return query & letters == query
 }
 
-// ASCII behavior is exactly the C++ unicode.hh classification; non-ASCII
-// codepoints use core:unicode tables instead of libc wide functions.
+// Exactly the C++ iswalnum classification (unicode.hh wide path), shared
+// with unicode_is_word.
 ranked_match_is_alnum :: proc(c: rune) -> bool {
-	if c >= 0 && c < 128 {
-		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-	}
-	if c < 0 {
-		// Artifact of invalid UTF-8 (sign-extended byte); iswalnum is false there.
-		return false
-	}
-	return unicode.is_letter(c) || unicode.is_digit(c)
+	return unicode_is_alnum(c)
 }
 
 // is_word with the default extra word chars ('_').
