@@ -527,3 +527,67 @@ normal_test_allocator_cleanup :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+@(test)
+normal_test_regex_validate_no_match_stashes_error :: proc(t: ^testing.T) {
+	// A validating select with no matches must fail the exec (the C++
+	// assigns the empty selection list and the next command throws);
+	// the port keeps selections non-empty and stashes the error instead.
+	fix := normal_test_ctx_make([]string{"hello\n"}, {0, 0}, {0, 0})
+	defer normal_test_ctx_destroy(&fix)
+	// normal_regex_call reads incsearch; the fixture only installs
+	// tabstop/indentwidth.
+	mgr := &fix.buffer.scope.data.options
+	idesc := new(Option_Desc, context.allocator)
+	idesc^ = Option_Desc{name = "incsearch"}
+	iopt := new(Option, context.allocator)
+	iopt^ = Option{desc = idesc, manager = mgr, value = false, allocator = context.allocator}
+	mgr.options["incsearch"] = iopt
+	if !test_commands_register_hold() {
+		testing.expect(t, false, "register singleton stayed busy")
+		return
+	}
+	defer test_commands_register_release()
+	register_manager_add(
+		register_manager_instance(), '/', register_manager_make_history("/", context.allocator),
+	)
+	h := Input_Handler{allocator = context.allocator}
+	defer input_handler_clear_key_error(&h)
+	fix.ctx.input_handler = &h
+	saved := selection_list_clone(context_selections(&fix.ctx))
+	defer selection_list_destroy(&saved)
+	d := normal_Regex_Data{
+		kind = .Select,
+		reg = '/',
+		forward = true,
+		mode = .Replace,
+		default_pattern = "zzz-no-match",
+		saved_selections = saved,
+		allocator = context.allocator,
+	}
+	normal_regex_call(&d, "", .Validate, &fix.ctx)
+	err, msg, ok := input_handler_take_key_error(&h, context.allocator)
+	defer delete(msg)
+	testing.expect(t, ok, "validating select with no matches must stash a key error")
+	testing.expect_value(t, err, Commands_Error.Error)
+	testing.expect_value(t, msg, "nothing selected")
+}
+
+@(test)
+normal_test_prompt_env_vars_own_keys :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+	env_vars := normal_count_register_env_vars(3, 'a', alloc)
+	// Every key and value must be a tracked heap allocation: static
+	// keys would be freed by env_vars_free and corrupt the heap.
+	for k, v in env_vars {
+		testing.expect(t, rawptr(raw_data(k)) in track.allocation_map, "prompt env key is not heap-owned")
+		testing.expect(t, rawptr(raw_data(v)) in track.allocation_map, "prompt env value is not heap-owned")
+	}
+	testing.expect_value(t, env_vars["count"], "3")
+	testing.expect_value(t, env_vars["register"], "a")
+	env_vars_free(&env_vars, alloc)
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

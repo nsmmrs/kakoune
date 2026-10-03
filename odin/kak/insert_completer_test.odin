@@ -385,3 +385,21 @@ test_insert_completer_shorten_display_name :: proc(t: ^testing.T) {
 	testing.expect(t, ellipsis)
 	testing.expect_value(t, suffix, "123456789012345678901")
 }
+
+@(test)
+test_insert_completer_update_inserted_ranges :: proc(t: ^testing.T) {
+	lines := []string{"hello world\n"}
+	buf := buffer_make("*test*", {}, lines, .None, .Lf, .Present, File_Fs_Status{})
+	defer buffer_destroy(buf)
+	c := Insert_Completer{}
+	defer insert_completer_destroy(&c)
+	append(&c.inserted_ranges, Buffer_Range{Coord_Buffer{0, 0}, Coord_Buffer{0, 5}})
+	c.completions.timestamp = buffer_timestamp(buf)
+	// Must not panic: the scratch selections array must hold exactly
+	// one entry per inserted range (a make-with-len plus append
+	// doubled it and indexed past the ranges).
+	insert_completer_update_inserted_ranges(&c, buf)
+	testing.expect_value(t, len(c.inserted_ranges), 1)
+	testing.expect_value(t, c.inserted_ranges[0].begin, Coord_Buffer{0, 0})
+	testing.expect_value(t, c.inserted_ranges[0].end, Coord_Buffer{0, 5})
+}

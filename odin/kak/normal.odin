@@ -919,6 +919,10 @@ normal_command_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx
 		); err != .None {
 			defer delete(msg, context.temp_allocator)
 			normal_fail(ctx, msg)
+			// The C++ lets the error throw to exec(); stash it for
+			// exec() to report since this callback cannot return it.
+			kind := Commands_Error.Error if err == .Error else .Fail
+			input_handler_set_key_error(context_input_handler(ctx), kind, msg)
 		} else {
 			delete(msg, context.temp_allocator)
 		}
@@ -963,15 +967,24 @@ normal_command_prompt :: proc(ctx: ^Context, env_vars: Env_Var_Map, reg: rune = 
 	)
 }
 
+// normal_count_register_env_vars builds the count/register env map
+// handed to prompts (port of the EnvVarMap built in command() and in
+// the <a-;> object prompt). Keys and values are owned clones so the
+// map can be released with env_vars_free; static keys would corrupt
+// the heap when the prompt is destroyed.
+normal_count_register_env_vars :: proc(count: int, reg: rune, allocator: mem.Allocator) -> Env_Var_Map {
+	env_vars := make(Env_Var_Map, 2, allocator)
+	env_vars[strings.clone("count", allocator)] = format_to_string_int(count, allocator)
+	reg_buf := make([]u8, 1, allocator)
+	reg_buf[0] = byte(reg)
+	env_vars[strings.clone("register", allocator)] = string(reg_buf)
+	return env_vars
+}
+
 // normal_cmd_command implements : (port of command(Context&, Params)).
 normal_cmd_command :: proc(ctx: ^Context, params: Normal_Params) {
 	alloc := normal_alloc(ctx)
-	env_vars := make(Env_Var_Map, 2, alloc)
-	count_str := format_to_string_int(params.count, alloc)
-	reg_buf := make([]u8, 1, alloc)
-	reg_buf[0] = byte(params.reg)
-	env_vars["count"] = count_str
-	env_vars["register"] = string(reg_buf)
+	env_vars := normal_count_register_env_vars(params.count, params.reg, alloc)
 	normal_command_prompt(ctx, env_vars, params.reg)
 }
 
@@ -1287,12 +1300,14 @@ normal_register :: proc(ctx: ^Context, reg: rune) -> ^Register {
 	return r
 }
 
-// normal_yank_to_register yanks the selections into reg. The yanked
-// strings transfer to the register: register_manager_static_set
-// borrows its values, so they are intentionally not freed.
+// normal_yank_to_register yanks the selections into reg (set clones
+// the values, so the yanked strings are freed here).
 normal_yank_to_register :: proc(ctx: ^Context, reg: rune) {
 	contents := context_selections_content(ctx)
 	register_manager_set(normal_register(ctx, reg), ctx, contents[:])
+	for c in contents {
+		delete(c)
+	}
 	delete(contents)
 }
 
@@ -2038,15 +2053,11 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 			return
 		}
 		if len(text) != 0 {
-			// Transfers to the register (set borrows).
-			owned := strings.clone(text, context.allocator)
-			register_manager_set(reg, ctx, []string{owned})
+			register_manager_set(reg, ctx, []string{text})
 		}
 	case .Validate:
 		if len(text) != 0 {
-			// Transfers to the register (set borrows).
-			owned := strings.clone(text, context.allocator)
-			register_manager_set(reg, ctx, []string{owned})
+			register_manager_set(reg, ctx, []string{text})
 		}
 		context_push_jump(ctx)
 	}
@@ -2069,6 +2080,9 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 	if regex_failed {
 		if event == .Validate {
 			normal_fail(ctx, "regex error")
+			// The C++ throws to exec(); stash it for exec() to
+			// report since this callback cannot return it.
+			input_handler_set_key_error(context_input_handler(ctx), .Error, "regex error")
 		} else {
 			input_handler_set_prompt_face(context_input_handler(ctx), input_handler_face(context_faces(ctx), "Error"))
 		}
@@ -2078,6 +2092,10 @@ normal_regex_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx: 
 		context_assign_selections(ctx, d.saved_selections)
 		if event == .Validate {
 			normal_fail(ctx, detail)
+			// The C++ assigns the empty selection list and the next
+			// command throws; fail here instead since the port keeps
+			// selections non-empty.
+			input_handler_set_key_error(context_input_handler(ctx), .Error, detail)
 		}
 	}
 }
@@ -2109,12 +2127,9 @@ normal_regex_prompt :: proc(
 	d.allocator = alloc
 	sels := context_selections(ctx)
 	d.saved_selections = selection_list_clone(sels, alloc)
-	saved := register_manager_save(normal_register(ctx, reg), ctx, alloc)
-	d.saved_reg = make([dynamic]string, len(saved), alloc)
-	for s, i in saved {
-		d.saved_reg[i] = strings.clone(s, alloc)
-	}
-	delete(saved)
+	// save returns an owned deep copy; the prompt takes it over and
+	// frees it in normal_regex_destroy.
+	d.saved_reg = register_manager_save(normal_register(ctx, reg), ctx, alloc)
 	main_value := register_manager_get_main(normal_register(ctx, reg), ctx, sels.main)
 	d.default_pattern = strings.clone(main_value, alloc)
 	completer := Prompt_Completer{call = normal_regex_complete, data = d}
@@ -2235,9 +2250,7 @@ normal_use_selection_as_search_pattern :: proc(ctx: ^Context, params: Normal_Par
 	reg_str := normal_reg_name(reg, context.temp_allocator)
 	msg, _ := format_format("register '{}' set to '{}'", []string{reg_str, joined}, context.temp_allocator)
 	normal_print_info(ctx, msg)
-	// Transfers to the register (set borrows).
-	owned := strings.clone(joined, context.allocator)
-	register_manager_set(normal_register(ctx, reg), ctx, []string{owned})
+	register_manager_set(normal_register(ctx, reg), ctx, []string{joined})
 	if context_has_client(ctx) {
 		client_force_redraw(context_client(ctx), false)
 	}
@@ -2960,18 +2973,14 @@ normal_object_key_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 		return
 	} else if key.modifiers == keys_MOD_ALT && key.key == ';' {
 		alloc := normal_alloc(ctx)
-		env_vars := make(Env_Var_Map, 4, alloc)
-		env_vars["count"] = format_to_string_int(d.params.count, alloc)
-		reg_buf := make([]u8, 1, alloc)
-		reg_buf[0] = byte(d.params.reg)
-		env_vars["register"] = string(reg_buf)
+		env_vars := normal_count_register_env_vars(d.params.count, d.params.reg, alloc)
 		mode_name := "replace"
 		if d.mode == .Extend {
 			mode_name = "extend"
 		} else if d.mode == .Append {
 			mode_name = "append"
 		}
-		env_vars["select_mode"] = strings.clone(mode_name, alloc)
+		env_vars[strings.clone("select_mode", alloc)] = strings.clone(mode_name, alloc)
 		flag_sb := strings.builder_make(alloc)
 		first := true
 		all_flags := Selectors_Object_Flags{.To_Begin, .To_End, .Inner, .Nested}
@@ -2992,7 +3001,7 @@ normal_object_key_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 				strings.write_string(&flag_sb, name)
 			}
 		}
-		env_vars["object_flags"] = strings.to_string(flag_sb)
+		env_vars[strings.clone("object_flags", alloc)] = strings.to_string(flag_sb)
 		normal_command_prompt(ctx, env_vars)
 		return
 	}
@@ -3371,6 +3380,9 @@ normal_cmd_jump :: proc(ctx: ^Context, params: Normal_Params, direction: Directi
 	}
 	if err != .None {
 		normal_fail(ctx, context_error_message(err))
+		// The C++ throws to exec(); stash it for exec() to report
+		// since normal commands cannot return errors.
+		input_handler_set_key_error(context_input_handler(ctx), .Error, context_error_message(err))
 		return
 	}
 	old_buffer := context_buffer(ctx)
@@ -3933,8 +3945,11 @@ normal_save_selections_to_register :: proc(ctx: ^Context, reg: rune, sels: ^Sele
 		}
 		append(&descs, desc)
 	}
-	// Transfers to the register (set borrows); the array shell is freed.
+	// set clones the values, so the descriptions are freed here.
 	register_manager_set(normal_register(ctx, reg), ctx, descs[:])
+	for d in descs {
+		delete(d, context.allocator)
+	}
 	delete(descs)
 	verb := "Combined" if combine else "Saved"
 	count_str := format_to_string_int(len(sels.selections), context.temp_allocator)

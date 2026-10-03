@@ -2,10 +2,12 @@
 // registers (static, dynamic, history, null) behind Register_VTable plus
 // the RegisterManager singleton.
 //
-// Register content borrows the set values' strings (like the C++
-// refcounted Strings); only the content arrays are owned. Destroy
-// registers with register_manager_destroy_register using the same
-// allocator passed to the make_* constructor.
+// Register content is owned: set/restore clone the values with the
+// register allocator (the C++ copies its refcounted Strings) and the
+// clones are freed on replacement or destroy. get/get_main return
+// borrowed views; save returns an owned deep copy. Destroy registers
+// with register_manager_destroy_register using the same allocator
+// passed to the make_* constructor.
 package kak
 
 import "core:mem"
@@ -18,21 +20,23 @@ Register_Manager_Error :: enum {
 }
 
 // Register_Manager_Static is the C++ StaticRegister data: a named,
-// directly assigned value list.
+// directly assigned value list. Content strings are owned clones.
 @(private = "file")
 Register_Manager_Static :: struct {
-	register: ^Register,
-	name:     string,
-	content:  [dynamic]string,
+	register:  ^Register,
+	name:      string,
+	content:   [dynamic]string,
+	allocator: mem.Allocator,
 }
 
 // Register_Manager_History is the C++ HistoryRegister data: a named,
-// most-recent-first value list.
+// most-recent-first value list. Content strings are owned clones.
 @(private = "file")
 Register_Manager_History :: struct {
-	register: ^Register,
-	name:     string,
-	content:  [dynamic]string,
+	register:  ^Register,
+	name:      string,
+	content:   [dynamic]string,
+	allocator: mem.Allocator,
 }
 
 // Register_Manager_Getter computes a dynamic register's owned value list
@@ -44,14 +48,16 @@ Register_Manager_Getter :: #type proc(ctx: ^Context, allocator: mem.Allocator) -
 Register_Manager_Setter :: #type proc(ctx: ^Context, values: []string)
 
 // Register_Manager_Dynamic is the C++ DynamicRegister data. The getter
-// and setter come from the caller (register_registers in main.cc).
+// and setter come from the caller (register_registers in main.cc). The
+// cached content strings are owned clones in the register allocator.
 @(private = "file")
 Register_Manager_Dynamic :: struct {
-	register: ^Register,
-	name:     string,
-	content:  [dynamic]string,
-	getter:   Register_Manager_Getter,
-	setter:   Register_Manager_Setter,
+	register:  ^Register,
+	name:      string,
+	content:   [dynamic]string,
+	getter:    Register_Manager_Getter,
+	setter:    Register_Manager_Setter,
+	allocator: mem.Allocator,
 }
 
 // Register_Manager_Null is the C++ NullRegister data (empty).
@@ -77,11 +83,23 @@ register_manager_run_modified_hook :: proc(reg: ^Register, name: string, ctx: ^C
 	hook_manager_run_hook(hooks, .Register_Modified, name, ctx)
 }
 
+// register_manager_free_content frees owned content strings (the array
+// itself is freed separately so refresh paths can reuse it).
+@(private = "file")
+register_manager_free_content :: proc(content: ^[dynamic]string, allocator: mem.Allocator) {
+	for s in content {
+		delete(s, allocator)
+	}
+	clear(content)
+}
+
 @(private = "file")
 register_manager_static_set :: proc(data: rawptr, ctx: ^Context, values: []string, restoring: bool) {
 	r := cast(^Register_Manager_Static)data
-	clear(&r.content)
-	append(&r.content, ..values)
+	register_manager_free_content(&r.content, r.allocator)
+	for v in values {
+		append(&r.content, strings.clone(v, r.allocator))
+	}
 	register_manager_run_modified_hook(r.register, r.name, ctx)
 }
 
@@ -107,6 +125,9 @@ register_manager_static_get_main :: proc(data: rawptr, ctx: ^Context, main_index
 @(private = "file")
 register_manager_static_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
 	r := cast(^Register_Manager_Static)data
+	for s in r.content {
+		delete(s, r.allocator)
+	}
 	delete(r.content)
 	free(r, allocator)
 }
@@ -115,16 +136,12 @@ register_manager_static_destroy :: proc(data: rawptr, allocator: mem.Allocator) 
 register_manager_history_set :: proc(data: rawptr, ctx: ^Context, values: []string, restoring: bool) {
 	r := cast(^Register_Manager_History)data
 	if restoring {
-		clear(&r.content)
-		append(&r.content, ..values)
-		w := 0
-		for s in r.content {
-			if len(s) > 0 {
-				r.content[w] = s
-				w += 1
+		register_manager_free_content(&r.content, r.allocator)
+		for v in values {
+			if len(v) > 0 {
+				append(&r.content, strings.clone(v, r.allocator))
 			}
 		}
-		resize(&r.content, w)
 		register_manager_run_modified_hook(r.register, r.name, ctx)
 		return
 	}
@@ -135,12 +152,17 @@ register_manager_history_set :: proc(data: rawptr, ctx: ^Context, values: []stri
 			if s != entry {
 				r.content[w] = s
 				w += 1
+			} else {
+				delete(s, r.allocator)
 			}
 		}
 		resize(&r.content, w)
-		inject_at(&r.content, 0, entry)
+		inject_at(&r.content, 0, strings.clone(entry, r.allocator))
 	}
 	if len(r.content) > 1000 {
+		for s in r.content[1000:] {
+			delete(s, r.allocator)
+		}
 		resize(&r.content, 1000)
 	}
 	register_manager_run_modified_hook(r.register, r.name, ctx)
@@ -167,6 +189,9 @@ register_manager_history_get_main :: proc(data: rawptr, ctx: ^Context, main_inde
 @(private = "file")
 register_manager_history_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
 	r := cast(^Register_Manager_History)data
+	for s in r.content {
+		delete(s, r.allocator)
+	}
 	delete(r.content)
 	free(r, allocator)
 }
@@ -179,9 +204,14 @@ register_manager_dynamic_set :: proc(data: rawptr, ctx: ^Context, values: []stri
 
 @(private = "file")
 register_manager_dynamic_get :: proc(data: rawptr, ctx: ^Context, allocator: mem.Allocator) -> []string {
+	_ = allocator
 	r := cast(^Register_Manager_Dynamic)data
+	// The getter computes a fresh owned list (C++ m_getter); adopt it,
+	// releasing the previous cache.
+	fresh := r.getter(ctx, r.allocator)
+	register_manager_free_content(&r.content, r.allocator)
 	delete(r.content)
-	r.content = r.getter(ctx, allocator)
+	r.content = fresh
 	if len(r.content) == 0 {
 		return register_manager_empty_content[:]
 	}
@@ -190,8 +220,9 @@ register_manager_dynamic_get :: proc(data: rawptr, ctx: ^Context, allocator: mem
 
 @(private = "file")
 register_manager_dynamic_get_main :: proc(data: rawptr, ctx: ^Context, main_index: int) -> string {
-	r := cast(^Register_Manager_Dynamic)data
-	content := r.content[:]
+	// Like the C++ (StaticRegister::get_main calls the virtual get),
+	// refresh through get so dynamic values are never stale.
+	content := register_manager_dynamic_get(data, ctx, context.allocator)
 	if len(content) == 0 {
 		return ""
 	}
@@ -201,6 +232,9 @@ register_manager_dynamic_get_main :: proc(data: rawptr, ctx: ^Context, main_inde
 @(private = "file")
 register_manager_dynamic_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
 	r := cast(^Register_Manager_Dynamic)data
+	for s in r.content {
+		delete(s, r.allocator)
+	}
 	delete(r.content)
 	free(r, allocator)
 }
@@ -272,6 +306,7 @@ register_manager_make_static :: proc(name: string, allocator := context.allocato
 	data.register = reg
 	data.name = name
 	data.content = make([dynamic]string, allocator)
+	data.allocator = allocator
 	reg.vtable = &register_manager_static_vtable
 	reg.data = data
 	return reg
@@ -284,6 +319,7 @@ register_manager_make_history :: proc(name: string, allocator := context.allocat
 	data.register = reg
 	data.name = name
 	data.content = make([dynamic]string, allocator)
+	data.allocator = allocator
 	reg.vtable = &register_manager_history_vtable
 	reg.data = data
 	return reg
@@ -304,6 +340,7 @@ register_manager_make_dynamic :: proc(
 	data.content = make([dynamic]string, allocator)
 	data.getter = getter
 	data.setter = setter
+	data.allocator = allocator
 	reg.vtable = &register_manager_dynamic_vtable
 	reg.data = data
 	return reg
@@ -330,7 +367,7 @@ register_manager_make_null :: proc(allocator := context.allocator) -> ^Register 
 }
 
 // register_manager_destroy_register frees a register built by make_*
-// (same allocator). Content strings are borrowed and not freed.
+// (same allocator), including its owned content strings.
 register_manager_destroy_register :: proc(reg: ^Register, allocator := context.allocator) {
 	reg.vtable.destroy(reg.data, allocator)
 	free(reg, allocator)
@@ -358,8 +395,8 @@ register_manager_get_main :: proc(reg: ^Register, ctx: ^Context, main_index: int
 	return reg.vtable.get_main(reg.data, ctx, main_index)
 }
 
-// register_manager_save copies the value list (port of Register::save).
-// The array is owned; the strings are borrowed.
+// register_manager_save copies the value list (port of Register::save):
+// an owned deep copy, unaffected by later assignments.
 register_manager_save :: proc(
 	reg: ^Register,
 	ctx: ^Context,
@@ -367,7 +404,9 @@ register_manager_save :: proc(
 ) -> [dynamic]string {
 	values := register_manager_get_values(reg, ctx, allocator)
 	res := make([dynamic]string, len(values), allocator)
-	copy(res[:], values)
+	for v, i in values {
+		res[i] = strings.clone(v, allocator)
+	}
 	return res
 }
 
@@ -508,11 +547,11 @@ register_manager_complete_name :: proc(
 // ---------------------------------------------------------------------------
 
 // register_manager_get_strings returns the named register's values (C++
-// RegisterManager::operator[] + Register::get, combined). The array is
-// owned; the strings borrow register content, like register_manager_save.
-// Deviation: the C++ throws runtime_error for an unknown register but
-// this signature (fixed by the STUB contract) has no error channel, so
-// it panics with the C++ message instead.
+// RegisterManager::operator[] + Register::get, combined): an owned deep
+// copy, like register_manager_save. Deviation: the C++ throws
+// runtime_error for an unknown register but this signature (fixed by
+// the STUB contract) has no error channel, so it panics with the C++
+// message instead.
 register_manager_get_strings :: proc(
 	reg: string,
 	ctx: ^Context,

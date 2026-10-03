@@ -33,11 +33,20 @@ json_ui_test_claim :: proc() -> bool {
 	return false
 }
 
-json_ui_test_on_key :: proc(key: Keys_Key) {
+json_ui_test_on_key :: proc(data: rawptr, key: Keys_Key) {
+	_ = data
 	append(&json_ui_test_keys, key)
 }
 
-json_ui_test_on_paste :: proc(content: string) {
+json_ui_test_seen_data: rawptr
+
+json_ui_test_on_key_data :: proc(data: rawptr, key: Keys_Key) {
+	_ = key
+	json_ui_test_seen_data = data
+}
+
+json_ui_test_on_paste :: proc(data: rawptr, content: string) {
+	_ = data
 	append(&json_ui_test_pastes, strings.clone(content))
 }
 
@@ -63,8 +72,8 @@ json_ui_test_teardown :: proc() {
 // json_ui_test_eval_ui builds a callback-wired UI for eval tests.
 json_ui_test_eval_ui :: proc() -> Json_Ui {
 	return Json_Ui{
-		on_key     = json_ui_test_on_key,
-		on_paste   = json_ui_test_on_paste,
+		on_key     = {json_ui_test_on_key, nil},
+		on_paste   = {json_ui_test_on_paste, nil},
 		allocator  = context.allocator,
 	}
 }
@@ -349,7 +358,7 @@ json_ui_test_eval_paste :: proc(t: ^testing.T) {
 		Json_Ui_Error.Bad_Paste,
 	)
 	// Without a paste callback the request still succeeds.
-	bare := Json_Ui{on_key = json_ui_test_on_key, allocator = context.allocator}
+	bare := Json_Ui{on_key = {json_ui_test_on_key, nil}, allocator = context.allocator}
 	testing.expect_value(
 		t,
 		json_ui_test_eval(t, &bare, `{"jsonrpc": "2.0", "method": "paste", "params": ["z"]}`),
@@ -601,8 +610,31 @@ json_ui_test_vtable_plumbing :: proc(t: ^testing.T) {
 	testing.expect(t, user_interface_is_ok(&iface))
 	ui.watcher.fd = -1
 	testing.expect(t, !user_interface_is_ok(&iface))
-	user_interface_set_on_key(&iface, json_ui_test_on_key)
-	testing.expect(t, ui.on_key != nil)
-	user_interface_set_on_paste(&iface, json_ui_test_on_paste)
-	testing.expect(t, ui.on_paste != nil)
+	user_interface_set_on_key(&iface, {json_ui_test_on_key, nil})
+	testing.expect(t, ui.on_key.call != nil)
+	user_interface_set_on_paste(&iface, {json_ui_test_on_paste, nil})
+	testing.expect(t, ui.on_paste.call != nil)
+}
+
+@(test)
+json_ui_test_callback_receives_data :: proc(t: ^testing.T) {
+	if !json_ui_test_claim() {
+		return
+	}
+	defer sync.mutex_unlock(&json_ui_test_mutex)
+	json_ui_test_reset()
+	defer json_ui_test_teardown()
+	// The client reaches the UI through the callback data (this wiring
+	// delivers scripted keys to the input handler).
+	marker: int = 42
+	ui := json_ui_test_eval_ui()
+	ui.requests = strings.clone(
+		"{\"jsonrpc\": \"2.0\", \"method\": \"keys\", \"params\": [\"q\"]}",
+		context.allocator,
+	)
+	defer delete(ui.requests)
+	ui.on_key = {json_ui_test_on_key_data, &marker}
+	json_ui_test_seen_data = nil
+	json_ui_consume_requests(&ui)
+	testing.expect(t, json_ui_test_seen_data == rawptr(&marker), "key callback must receive its data")
 }

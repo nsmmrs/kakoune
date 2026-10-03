@@ -2,19 +2,22 @@
 //
 // Each builtin has a core proc (commands_<name>) returning
 // (Commands_Error, string) with an owned message on failure, plus a thin
-// Command_Func.call wrapper (commands_<name>_call) that reports failures
-// on the status line. Cores take an explicit Commands_Env instead of
-// touching singletons so tests stay hermetic; wrappers build it from the
-// singletons (C++ parity).
+// Command_Func.call wrapper (commands_<name>_call) that returns the core
+// result for execute() to propagate (C++ parity: the C++ rethrows).
+// Cores take an explicit Commands_Env instead of touching singletons so
+// tests stay hermetic; wrappers build it from the singletons (C++
+// parity). Kill_Session removes every client synchronously and records
+// its status in commands_kill_status; execute maps it to success since
+// the session exit follows from the empty client list.
 //
 // Deviations from the C++:
-//   * C++ throws runtime_error/failure/kill_session; here cores return
-//     Commands_Error and wrappers print it (status text is never freed,
-//     the client convention). Kill_Session records its status in
-//     commands_kill_status for the unmerged main loop.
-//   * Nested failures cannot propagate through void Command_Func.call
-//     (knot limitation, also noted in command_manager.odin), so try/catch
-//     only observes parse-level errors from nested execute.
+//   * C++ throws runtime_error/failure/kill_session; here cores and
+//     wrappers return Commands_Error with an owned message.
+//   * Key-handling failures cannot throw through the void input-handler
+//     callbacks, so normal commands and the : prompt stash them in the
+//     handler's pending key-error slot for exec() to report (aborting
+//     the remaining keys); only the : prompt and jump failures stash
+//     today, the rest stay status-line-only.
 //   * Async shell-script completers run synchronously via
 //     shell_manager_eval_full (no event loop is available here).
 //   * BusyIndicator progress display is skipped (UI-only).
@@ -995,13 +998,10 @@ commands_reg_saver_make :: proc(
 			err, msg := commands_errorf("no such register: '{}'", {regs}, allocator)
 			return {}, err, msg
 		}
+		// save returns an owned deep copy; the saver takes it over and
+		// frees it in commands_reg_saver_destroy.
 		values := register_manager_save(reg, ctx, allocator)
-		cloned := make([dynamic]string, len(values), allocator)
-		for v, i in values {
-			cloned[i] = strings.clone(v, allocator)
-		}
-		delete(values)
-		append(&saver.saves, Commands_Saved_Reg{reg, cloned})
+		append(&saver.saves, Commands_Saved_Reg{reg, values})
 	}
 	return saver, .None, ""
 }
@@ -5655,6 +5655,10 @@ commands_execute_keys_body :: proc(
 	defer utils_scoped_bool_release(&hooks_guard)
 
 	handler := context_input_handler(ctx)
+	// Only errors from this exec's keys are reported; stale interactive
+	// failures must not abort it (the C++ unwinds instead, aborting the
+	// remaining keys on the first failure, as below).
+	input_handler_clear_key_error(handler)
 	for i in 0 ..< parameters_parser_positional_count(p) {
 		keys, kerr, kmsg := commands_parse_keys(
 			parameters_parser_positional(p, i),
@@ -5665,6 +5669,10 @@ commands_execute_keys_body :: proc(
 		}
 		for key in keys {
 			input_handler_handle_key(handler, key)
+			if key_err, key_msg, ok := input_handler_take_key_error(handler, allocator); ok {
+				delete(keys)
+				return key_err, key_msg
+			}
 		}
 		delete(keys)
 	}
@@ -6507,7 +6515,7 @@ commands_defined_command_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	stored := cast(^Commands_Defined_Command)data
 	allocator := ctx.allocator
 	local := scope_local_make(ctx, context_scope(ctx), allocator)
@@ -6535,10 +6543,11 @@ commands_defined_command_call :: proc(
 		allocator,
 	)
 	if exec_err == .Fail {
-		commands_report(.Fail, exec_msg, ctx)
+		return .Fail, exec_msg
 	} else if exec_err != .None {
-		commands_report(.Error, exec_msg, ctx)
+		return .Error, exec_msg
 	}
+	return .None, ""
 }
 
 commands_defined_command_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
@@ -6879,9 +6888,8 @@ commands_nop_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_nop()
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_nop()
 }
 
 commands_edit_call :: proc(
@@ -6889,10 +6897,9 @@ commands_edit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_edit(p, ctx, &env, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_edit(p, ctx, &env, false, ctx.allocator)
 }
 
 commands_force_edit_call :: proc(
@@ -6900,10 +6907,9 @@ commands_force_edit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_edit(p, ctx, &env, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_edit(p, ctx, &env, true, ctx.allocator)
 }
 
 commands_write_call :: proc(
@@ -6911,9 +6917,8 @@ commands_write_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_write(p, ctx, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_write(p, ctx, false, ctx.allocator)
 }
 
 commands_force_write_call :: proc(
@@ -6921,9 +6926,8 @@ commands_force_write_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_write(p, ctx, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_write(p, ctx, true, ctx.allocator)
 }
 
 commands_write_all_call :: proc(
@@ -6931,10 +6935,9 @@ commands_write_all_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_write_all(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_write_all(p, ctx, &env, ctx.allocator)
 }
 
 commands_kill_call :: proc(
@@ -6942,10 +6945,9 @@ commands_kill_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_kill(p, ctx, &env, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_kill(p, ctx, &env, false, ctx.allocator)
 }
 
 commands_force_kill_call :: proc(
@@ -6953,10 +6955,9 @@ commands_force_kill_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_kill(p, ctx, &env, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_kill(p, ctx, &env, true, ctx.allocator)
 }
 
 commands_daemonize_session_call :: proc(
@@ -6964,10 +6965,9 @@ commands_daemonize_session_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_daemonize_session(&env)
-	commands_report(err, msg, ctx)
+	return commands_daemonize_session(&env)
 }
 
 commands_quit_call :: proc(
@@ -6975,10 +6975,9 @@ commands_quit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_quit(p, ctx, &env, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_quit(p, ctx, &env, false, ctx.allocator)
 }
 
 commands_force_quit_call :: proc(
@@ -6986,10 +6985,9 @@ commands_force_quit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_quit(p, ctx, &env, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_quit(p, ctx, &env, true, ctx.allocator)
 }
 
 commands_write_quit_call :: proc(
@@ -6997,10 +6995,9 @@ commands_write_quit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_write_quit(p, ctx, &env, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_write_quit(p, ctx, &env, false, ctx.allocator)
 }
 
 commands_force_write_quit_call :: proc(
@@ -7008,10 +7005,9 @@ commands_force_write_quit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_write_quit(p, ctx, &env, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_write_quit(p, ctx, &env, true, ctx.allocator)
 }
 
 commands_write_all_quit_call :: proc(
@@ -7019,10 +7015,9 @@ commands_write_all_quit_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_write_all_quit(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_write_all_quit(p, ctx, &env, ctx.allocator)
 }
 
 commands_buffer_call :: proc(
@@ -7030,10 +7025,9 @@ commands_buffer_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_buffer(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_buffer(p, ctx, &env, ctx.allocator)
 }
 
 commands_buffer_next_call :: proc(
@@ -7041,10 +7035,9 @@ commands_buffer_next_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_cycle_buffer(ctx, &env, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_cycle_buffer(ctx, &env, true, ctx.allocator)
 }
 
 commands_buffer_previous_call :: proc(
@@ -7052,10 +7045,9 @@ commands_buffer_previous_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_cycle_buffer(ctx, &env, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_cycle_buffer(ctx, &env, false, ctx.allocator)
 }
 
 commands_delete_buffer_call :: proc(
@@ -7063,10 +7055,9 @@ commands_delete_buffer_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_delete_buffer(p, ctx, &env, false, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_delete_buffer(p, ctx, &env, false, ctx.allocator)
 }
 
 commands_force_delete_buffer_call :: proc(
@@ -7074,10 +7065,9 @@ commands_force_delete_buffer_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_delete_buffer(p, ctx, &env, true, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_delete_buffer(p, ctx, &env, true, ctx.allocator)
 }
 
 commands_rename_buffer_call :: proc(
@@ -7085,9 +7075,8 @@ commands_rename_buffer_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_rename_buffer(p, ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_rename_buffer(p, ctx, ctx.allocator)
 }
 
 commands_arrange_buffers_call :: proc(
@@ -7095,10 +7084,9 @@ commands_arrange_buffers_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_arrange_buffers(p, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_arrange_buffers(p, &env, ctx.allocator)
 }
 
 commands_add_highlighter_call :: proc(
@@ -7106,10 +7094,9 @@ commands_add_highlighter_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_add_highlighter(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_add_highlighter(p, ctx, &env, ctx.allocator)
 }
 
 commands_remove_highlighter_call :: proc(
@@ -7117,10 +7104,9 @@ commands_remove_highlighter_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_remove_highlighter(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_remove_highlighter(p, ctx, &env, ctx.allocator)
 }
 
 commands_hook_call :: proc(
@@ -7128,10 +7114,9 @@ commands_hook_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_hook(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_hook(p, ctx, &env, ctx.allocator)
 }
 
 commands_remove_hooks_call :: proc(
@@ -7139,10 +7124,9 @@ commands_remove_hooks_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_remove_hooks(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_remove_hooks(p, ctx, &env, ctx.allocator)
 }
 
 commands_trigger_user_hook_call :: proc(
@@ -7150,9 +7134,8 @@ commands_trigger_user_hook_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_trigger_user_hook(p, ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_trigger_user_hook(p, ctx, ctx.allocator)
 }
 
 commands_define_command_call :: proc(
@@ -7160,10 +7143,9 @@ commands_define_command_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_define_command(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_define_command(p, ctx, &env, ctx.allocator)
 }
 
 commands_complete_command_call :: proc(
@@ -7171,10 +7153,9 @@ commands_complete_command_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_complete_command(p, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_complete_command(p, &env, ctx.allocator)
 }
 
 commands_alias_call :: proc(
@@ -7182,10 +7163,9 @@ commands_alias_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_alias(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_alias(p, ctx, &env, ctx.allocator)
 }
 
 commands_unalias_call :: proc(
@@ -7193,10 +7173,9 @@ commands_unalias_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_unalias(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_unalias(p, ctx, &env, ctx.allocator)
 }
 
 commands_echo_call :: proc(
@@ -7204,10 +7183,9 @@ commands_echo_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_echo(p, ctx, shell_ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_echo(p, ctx, shell_ctx, &env, ctx.allocator)
 }
 
 commands_debug_call :: proc(
@@ -7215,10 +7193,9 @@ commands_debug_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_debug(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_debug(p, ctx, &env, ctx.allocator)
 }
 
 commands_source_call :: proc(
@@ -7226,10 +7203,9 @@ commands_source_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_source(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_source(p, ctx, &env, ctx.allocator)
 }
 
 commands_set_option_call :: proc(
@@ -7237,10 +7213,9 @@ commands_set_option_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_set_option(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_set_option(p, ctx, &env, ctx.allocator)
 }
 
 commands_unset_option_call :: proc(
@@ -7248,10 +7223,9 @@ commands_unset_option_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_unset_option(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_unset_option(p, ctx, &env, ctx.allocator)
 }
 
 commands_update_option_call :: proc(
@@ -7259,10 +7233,9 @@ commands_update_option_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_update_option(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_update_option(p, ctx, &env, ctx.allocator)
 }
 
 commands_declare_option_call :: proc(
@@ -7270,10 +7243,9 @@ commands_declare_option_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_declare_option(p, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_declare_option(p, &env, ctx.allocator)
 }
 
 commands_map_call :: proc(
@@ -7281,10 +7253,9 @@ commands_map_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_map(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_map(p, ctx, &env, ctx.allocator)
 }
 
 commands_unmap_call :: proc(
@@ -7292,10 +7263,9 @@ commands_unmap_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_unmap(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_unmap(p, ctx, &env, ctx.allocator)
 }
 
 commands_execute_keys_call :: proc(
@@ -7303,10 +7273,9 @@ commands_execute_keys_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_execute_keys(p, ctx, shell_ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_execute_keys(p, ctx, shell_ctx, &env, ctx.allocator)
 }
 
 commands_evaluate_commands_call :: proc(
@@ -7314,10 +7283,9 @@ commands_evaluate_commands_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_evaluate_commands(p, ctx, shell_ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_evaluate_commands(p, ctx, shell_ctx, &env, ctx.allocator)
 }
 
 commands_prompt_call :: proc(
@@ -7325,9 +7293,8 @@ commands_prompt_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_prompt(p, ctx, shell_ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_prompt(p, ctx, shell_ctx, ctx.allocator)
 }
 
 commands_on_key_call :: proc(
@@ -7335,9 +7302,8 @@ commands_on_key_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_on_key(p, ctx, shell_ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_on_key(p, ctx, shell_ctx, ctx.allocator)
 }
 
 commands_info_call :: proc(
@@ -7345,9 +7311,8 @@ commands_info_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_info(p, ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_info(p, ctx, ctx.allocator)
 }
 
 commands_try_call :: proc(
@@ -7355,9 +7320,8 @@ commands_try_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_try(p, ctx, shell_ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_try(p, ctx, shell_ctx, ctx.allocator)
 }
 
 commands_set_face_call :: proc(
@@ -7365,10 +7329,9 @@ commands_set_face_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_set_face(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_set_face(p, ctx, &env, ctx.allocator)
 }
 
 commands_unset_face_call :: proc(
@@ -7376,10 +7339,9 @@ commands_unset_face_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_unset_face(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_unset_face(p, ctx, &env, ctx.allocator)
 }
 
 commands_rename_client_call :: proc(
@@ -7387,10 +7349,9 @@ commands_rename_client_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_rename_client(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_rename_client(p, ctx, &env, ctx.allocator)
 }
 
 commands_set_register_call :: proc(
@@ -7398,10 +7359,9 @@ commands_set_register_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_set_register(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_set_register(p, ctx, &env, ctx.allocator)
 }
 
 commands_select_call :: proc(
@@ -7409,9 +7369,8 @@ commands_select_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_select(p, ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_select(p, ctx, ctx.allocator)
 }
 
 commands_change_directory_call :: proc(
@@ -7419,10 +7378,9 @@ commands_change_directory_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_change_directory(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_change_directory(p, ctx, &env, ctx.allocator)
 }
 
 commands_rename_session_call :: proc(
@@ -7430,10 +7388,9 @@ commands_rename_session_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_rename_session(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_rename_session(p, ctx, &env, ctx.allocator)
 }
 
 commands_fail_call :: proc(
@@ -7441,9 +7398,8 @@ commands_fail_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_fail(p, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_fail(p, ctx.allocator)
 }
 
 commands_declare_user_mode_call :: proc(
@@ -7451,9 +7407,8 @@ commands_declare_user_mode_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_declare_user_mode(p, ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_declare_user_mode(p, ctx, ctx.allocator)
 }
 
 commands_enter_user_mode_call :: proc(
@@ -7461,9 +7416,8 @@ commands_enter_user_mode_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
-	err, msg := commands_enter_user_mode(p, ctx, ctx.allocator)
-	commands_report(err, msg, ctx)
+) -> (Commands_Error, string) {
+	return commands_enter_user_mode(p, ctx, ctx.allocator)
 }
 
 commands_provide_module_call :: proc(
@@ -7471,10 +7425,9 @@ commands_provide_module_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_provide_module(p, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_provide_module(p, &env, ctx.allocator)
 }
 
 commands_require_module_call :: proc(
@@ -7482,10 +7435,9 @@ commands_require_module_call :: proc(
 	p: ^Parameters_Parser,
 	ctx: ^Context,
 	shell_ctx: ^Shell_Context,
-) {
+) -> (Commands_Error, string) {
 	env := commands_default_env()
-	err, msg := commands_require_module(p, ctx, &env, ctx.allocator)
-	commands_report(err, msg, ctx)
+	return commands_require_module(p, ctx, &env, ctx.allocator)
 }
 
 // commands_register_all registers every builtin command and its alias

@@ -1301,8 +1301,8 @@ remote_ui_on_event :: proc(watcher: ^Event_Manager_Fd_Watcher, events: Event_Man
 					coord := keys_coord(key)
 					ui.dimensions = Coord_Display{line = Coord_Line(coord.line), column = Coord_Column(coord.column)}
 				}
-				if ui.on_key != nil {
-					ui.on_key(key)
+				if ui.on_key.call != nil {
+					ui.on_key.call(ui.on_key.data, key)
 				}
 			case .Paste:
 				content, err := remote_msg_reader_read_string(&ui.reader, ui.allocator)
@@ -1312,8 +1312,8 @@ remote_ui_on_event :: proc(watcher: ^Event_Manager_Fd_Watcher, events: Event_Man
 					event_manager_fd_watcher_close_fd(watcher)
 					return
 				}
-				if ui.on_paste != nil {
-					ui.on_paste(content)
+				if ui.on_paste.call != nil {
+					ui.on_paste.call(ui.on_paste.data, content)
 				}
 				delete(content, ui.allocator)
 			case .Unknown, .Connect, .Command, .Menu_Show, .Menu_Select, .Menu_Hide, .Info_Show, .Info_Hide, .Draw, .Draw_Status, .Refresh, .Set_Options, .Exit:
@@ -1391,8 +1391,8 @@ remote_client_init :: proc(
 	c.socket_watcher = new(Event_Manager_Fd_Watcher, allocator)
 	event_manager_fd_watcher_init(c.socket_watcher, sock, {.Read, .Write}, .Urgent, remote_client_on_event)
 	remote_watcher_register(c.socket_watcher, .Client, state, allocator)
-	user_interface_set_on_key(ui, remote_client_ui_on_key)
-	user_interface_set_on_paste(ui, remote_client_ui_on_paste)
+	user_interface_set_on_key(ui, {remote_client_ui_on_key, nil})
+	user_interface_set_on_paste(ui, {remote_client_ui_on_paste, nil})
 	remote_client_current = c
 	return .None
 }
@@ -1429,7 +1429,8 @@ remote_client_is_ui_ok :: proc(c: ^Remote_Client) -> bool {
 
 // remote_client_ui_on_key forwards a locally pressed key to the
 // server (the UI on_key trampoline through remote_client_current).
-remote_client_ui_on_key :: proc(key: Keys_Key) {
+remote_client_ui_on_key :: proc(data: rawptr, key: Keys_Key) {
+	_ = data
 	c := remote_client_current
 	if c == nil || c.socket_watcher == nil {
 		return
@@ -1442,7 +1443,8 @@ remote_client_ui_on_key :: proc(key: Keys_Key) {
 
 // remote_client_ui_on_paste forwards locally pasted text to the
 // server (the UI on_paste trampoline through remote_client_current).
-remote_client_ui_on_paste :: proc(content: string) {
+remote_client_ui_on_paste :: proc(data: rawptr, content: string) {
+	_ = data
 	c := remote_client_current
 	if c == nil || c.socket_watcher == nil {
 		return

@@ -1007,15 +1007,18 @@ option_manager_test_flags_options :: proc(t: ^testing.T) {
 	defer delete(s3)
 	testing.expect_value(t, s3, "hooks|keys")
 
-	// Parsing splits on '|' and rejects unknown/empty segments.
+	// Parsing splits on '|' and rejects unknown segments; an empty spec
+	// means empty flags (the C++ split yields zero parts for it, and the
+	// C++ oracle accepts `set autoinfo ""`, clearing the flags).
 	v, err, _ := option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"prompt|insert"})
 	testing.expect_value(t, err, Option_Manager_Error.None)
 	testing.expect_value(t, v.(Auto_Complete), Auto_Complete{.Insert, .Prompt})
 	_, fmerr, fmsg := option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert|bogus"})
 	testing.expect_value(t, fmerr, Option_Manager_Error.Convert)
 	testing.expect_value(t, fmsg, "invalid flag value")
-	_, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {""})
-	testing.expect_value(t, err, Option_Manager_Error.Convert)
+	v, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {""})
+	testing.expect_value(t, err, Option_Manager_Error.None)
+	testing.expect_value(t, v.(Auto_Complete), Auto_Complete{})
 	_, err, fmsg = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert", "prompt"})
 	testing.expect_value(t, err, Option_Manager_Error.Convert)
 	testing.expect_value(t, fmsg, "expected a single value for option")
@@ -1181,4 +1184,23 @@ option_manager_test_new_options_end_to_end :: proc(t: ^testing.T) {
 	g := option_manager_option_get_as_string(fopt, .Raw)
 	defer delete(g)
 	testing.expect_value(t, g, "command|normal")
+}
+
+@(test)
+option_manager_test_empty_flags_string :: proc(t: ^testing.T) {
+	// An empty spec means empty flags (the C++ split view yields zero
+	// parts for it); interior empty parts still error.
+	v, ok := option_manager_flags_from_string(
+		Auto_Info, Auto_Info_Flag, "", option_manager_AUTO_INFO_DESCS[:],
+	)
+	testing.expect(t, ok)
+	testing.expect_value(t, v, Auto_Info{})
+	_, ok = option_manager_flags_from_string(
+		Auto_Info, Auto_Info_Flag, "command|", option_manager_AUTO_INFO_DESCS[:],
+	)
+	testing.expect(t, !ok)
+	_, ok = option_manager_flags_from_string(
+		Auto_Info, Auto_Info_Flag, "nope", option_manager_AUTO_INFO_DESCS[:],
+	)
+	testing.expect(t, !ok)
 }

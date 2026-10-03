@@ -28,10 +28,10 @@
 //   * The char/Codepoint parse_quoted overloads merge into one rune-based
 //     proc; behavior is identical (a multibyte char never equals an ASCII
 //     delimiter, and non-ASCII delimiters compare as codepoints).
-//   * Command_Func.call in knot.odin returns void, so errors raised by a
-//     command body cannot propagate back through execute_single_command
-//     (C++ rethrows them). Nested `fail` propagation is impossible until
-//     the knot callback signature carries errors.
+//   * execute_single_command propagates the command body's errors like
+//     the C++ rethrow (Fail undecorated, Error decorated by execute);
+//     Kill_Session completes successfully since the core already
+//     removed every client and recorded its status.
 //   * parameters_parser_parse drops the offending token, so parameter
 //     errors render with an empty name; switch-argument completion always
 //     yields nothing (the merged desc drops the arg completer).
@@ -1028,7 +1028,7 @@ command_manager_execute_single_command :: proc(
 	}
 	defer parameters_parser_free(&pparser)
 
-	cmd.func.call(cmd.func.data, &pparser, ctx, shell_ctx)
+	call_err, call_msg := cmd.func.call(cmd.func.data, &pparser, ctx, shell_ctx)
 
 	if profile_on {
 		microseconds := int(clock_diff(profile_start, clock_now())) / 1000
@@ -1041,6 +1041,14 @@ command_manager_execute_single_command :: proc(
 		msg := strings.to_string(b)
 		debug_write_to_debug_buffer(msg)
 		delete(msg, allocator)
+	}
+	// C++ parity: the command body rethrows through execute.
+	// Kill_Session already removed every client (and recorded its
+	// status), so it completes successfully here.
+	if call_err == .Fail {
+		return .Fail, call_msg
+	} else if call_err == .Error {
+		return .Error, call_msg
 	}
 	return .None, ""
 }

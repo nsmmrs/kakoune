@@ -568,8 +568,8 @@ test_main_dummy_ui :: proc(t: ^testing.T) {
 	ui.vtable.draw(nil, nil, {}, {}, {}, 0)
 	ui.vtable.draw_status(nil, nil, nil, 0, nil, {}, .Status)
 	ui.vtable.refresh(nil, true)
-	ui.vtable.set_on_key(nil, nil)
-	ui.vtable.set_on_paste(nil, nil)
+	ui.vtable.set_on_key(nil, {})
+	ui.vtable.set_on_paste(nil, {})
 	ui.vtable.set_ui_options(nil, nil)
 	// main_make_ui routes Dummy to the same implementation.
 	ui2 := main_make_ui(.Dummy)

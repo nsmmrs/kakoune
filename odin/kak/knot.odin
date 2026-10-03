@@ -810,6 +810,16 @@ Input_Mode :: struct {
 }
 
 // Input_Handler is C++ InputHandler. Owns context (by value) and mode stack.
+// Input_Handler_Key_Error is a stashed key-handling failure (port of
+// the C++ exception escaping handle_key): normal commands and prompt
+// callbacks cannot return errors, so failures are recorded here for
+// exec() to report, aborting the remaining keys. msg is owned by the
+// handler allocator.
+Input_Handler_Key_Error :: struct {
+	kind: Commands_Error, // .Fail or .Error
+	msg:  string,
+}
+
 Input_Handler :: struct {
 	ctx:          Context,
 	mode_stack:       [dynamic]^Input_Mode,
@@ -819,6 +829,7 @@ Input_Handler :: struct {
 	recorded_keys:    [dynamic]Keys_Key,
 	recording_level:  int,
 	allocator:        mem.Allocator,
+	pending_key_error: Maybe(Input_Handler_Key_Error),
 }
 
 Auto_Info_Flag :: enum {
@@ -963,9 +974,11 @@ Client_Manager :: struct {
 
 Command_Parameters :: []string
 
-// Command_Func is C++ CommandFunc.
+// Command_Func is C++ CommandFunc. call returns the C++ exception
+// outcome: None on success, otherwise an owned message, like the
+// command cores (Fail propagates undecorated through execute).
 Command_Func :: struct {
-	call:    proc(data: rawptr, parser: ^Parameters_Parser, ctx: ^Context, shell_context: ^Shell_Context),
+	call:    proc(data: rawptr, parser: ^Parameters_Parser, ctx: ^Context, shell_context: ^Shell_Context) -> (Commands_Error, string),
 	data:    rawptr,
 	destroy: proc(data: rawptr, allocator: mem.Allocator),
 }

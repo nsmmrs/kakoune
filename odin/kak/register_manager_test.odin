@@ -2,6 +2,7 @@ package kak
 
 import "core:fmt"
 import "core:mem"
+import "core:strings"
 import "core:testing"
 
 // register_manager_test_disable_hooks turns the modified hook off so the
@@ -16,7 +17,7 @@ register_manager_test_getter_calls := 0
 register_manager_test_getter :: proc(ctx: ^Context, allocator: mem.Allocator) -> [dynamic]string {
 	register_manager_test_getter_calls += 1
 	res := make([dynamic]string, allocator)
-	append(&res, "g1", "g2")
+	append(&res, strings.clone("g1", allocator), strings.clone("g2", allocator))
 	return res
 }
 
@@ -30,7 +31,7 @@ register_manager_test_readonly_getter :: proc(
 ) -> [dynamic]string {
 	register_manager_test_readonly_getter_calls += 1
 	res := make([dynamic]string, allocator)
-	append(&res, "g1", "g2")
+	append(&res, strings.clone("g1", allocator), strings.clone("g2", allocator))
 	return res
 }
 
@@ -59,6 +60,30 @@ register_manager_test_static_set_get :: proc(t: ^testing.T) {
 	got = register_manager_get_values(reg, nil)
 	testing.expect_value(t, len(got), 1)
 	testing.expect_value(t, got[0], "z")
+}
+
+@(test)
+register_manager_test_set_owns_values :: proc(t: ^testing.T) {
+	// Regression: set must clone its values (command params are freed
+	// after each command; borrowing them corrupted the heap and
+	// crashed %reg expansion with "free(): invalid pointer").
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+	reg := register_manager_make_static("a", alloc)
+	register_manager_test_disable_hooks(reg)
+	tmp := strings.clone("volatile", context.temp_allocator)
+	register_manager_set(reg, nil, {tmp})
+	delete(tmp, context.temp_allocator)
+	got := register_manager_get_values(reg, nil)
+	testing.expect_value(t, len(got), 1)
+	testing.expect_value(t, got[0], "volatile")
+	testing.expect(t, raw_data(got[0]) != raw_data(tmp), "register content must be a clone, not a borrow")
+	// Replacement frees the old clone; destroy frees the rest.
+	register_manager_set(reg, nil, {"still", "here"})
+	register_manager_destroy_register(reg, alloc)
+	testing.expect_value(t, len(track.allocation_map), 0)
 }
 
 @(test)
@@ -94,10 +119,15 @@ register_manager_test_save_restore :: proc(t: ^testing.T) {
 
 	register_manager_set(reg, nil, {"p", "q"})
 	saved := register_manager_save(reg, nil)
-	defer delete(saved)
+	defer {
+		for s in saved {
+			delete(s)
+		}
+		delete(saved)
+	}
 	testing.expect_value(t, len(saved), 2)
 
-	// The save is a copy: later assignments do not affect it.
+	// The save is a deep copy: later assignments do not affect it.
 	register_manager_set(reg, nil, {"z"})
 	testing.expect_value(t, len(saved), 2)
 	testing.expect_value(t, saved[0], "p")
@@ -206,11 +236,14 @@ register_manager_test_dynamic :: proc(t: ^testing.T) {
 	testing.expect_value(t, register_manager_test_getter_calls, 1)
 	testing.expect_value(t, len(got), 2)
 	testing.expect_value(t, got[0], "g1")
+	// get_main refreshes through get, like the C++ (StaticRegister's
+	// get_main calls the virtual get), so dynamic reads never go stale.
 	testing.expect_value(t, register_manager_get_main(reg, nil, 1), "g2")
+	testing.expect_value(t, register_manager_test_getter_calls, 2)
 
 	// A second read refreshes (and frees) the previous content.
 	_ = register_manager_get_values(reg, nil)
-	testing.expect_value(t, register_manager_test_getter_calls, 2)
+	testing.expect_value(t, register_manager_test_getter_calls, 3)
 
 	register_manager_set(reg, nil, {"s1", "s2", "s3"})
 	testing.expect_value(t, len(register_manager_test_setter_seen), 3)

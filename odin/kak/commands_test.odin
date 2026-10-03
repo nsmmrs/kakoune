@@ -3053,3 +3053,21 @@ test_commands_profile_hash_maps :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(first, "map (100) -- inserts: "))
 	testing.expect(t, strings.has_suffix(first, ")\n"))
 }
+
+@(test)
+test_commands_fail_call_propagates :: proc(t: ^testing.T) {
+	// Wrappers return the core result for execute() to propagate (the
+	// C++ rethrows); try/catch and the client loop observe body errors.
+	spec, ok := commands_spec_for("fail", context.allocator)
+	assert(ok)
+	defer commands_destroy_desc(&spec.desc)
+	p, perr := parameters_parser_parse([]string{"boom"}, spec.desc, false, context.allocator)
+	assert(perr == .None)
+	defer parameters_parser_free(&p)
+	ctx := Context{allocator = context.allocator}
+	shell_ctx := Shell_Context{}
+	err, msg := commands_fail_call(nil, &p, &ctx, &shell_ctx)
+	defer delete(msg)
+	testing.expect_value(t, err, Commands_Error.Fail)
+	testing.expect_value(t, msg, "boom")
+}

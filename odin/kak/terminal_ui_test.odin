@@ -903,16 +903,18 @@ test_terminal_ui_vtable :: proc(t: ^testing.T) {
 	testing.expect(t, !terminal_ui_window_valid(&ui.info.window))
 
 	// Callbacks install through the handle.
-	on_key := proc(key: Keys_Key) {
+	on_key := proc(data: rawptr, key: Keys_Key) {
+		_ = data
 		_ = key
 	}
-	user_interface_set_on_key(&iface, on_key)
-	testing.expect(t, ui.on_key != nil)
-	on_paste := proc(content: string) {
+	user_interface_set_on_key(&iface, {on_key, nil})
+	testing.expect(t, ui.on_key.call != nil)
+	on_paste := proc(data: rawptr, content: string) {
+		_ = data
 		_ = content
 	}
-	user_interface_set_on_paste(&iface, on_paste)
-	testing.expect(t, ui.on_paste != nil)
+	user_interface_set_on_paste(&iface, {on_paste, nil})
+	testing.expect(t, ui.on_paste.call != nil)
 	options := terminal_ui_test_options("terminal_padding_char", "!")
 	defer delete(options)
 	user_interface_set_ui_options(&iface, options)

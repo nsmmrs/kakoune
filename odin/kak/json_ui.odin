@@ -679,7 +679,7 @@ json_ui_log_error :: proc(ui: ^Json_Ui, message: string) {
 // the JsonUI::parse_requests evaluation loop). Nothing runs until a
 // key callback is installed.
 json_ui_consume_requests :: proc(ui: ^Json_Ui) {
-	if ui.on_key == nil {
+	if ui.on_key.call == nil {
 		return
 	}
 	for len(ui.requests) > 0 {
@@ -730,7 +730,7 @@ json_ui_eval_keys :: proc(ui: ^Json_Ui, params: Json_Array) -> Json_Ui_Error {
 			return .Key_Error
 		}
 		for key in keys {
-			ui.on_key(key)
+			ui.on_key.call(ui.on_key.data, key)
 		}
 	}
 	return .None
@@ -749,7 +749,7 @@ json_ui_eval_mouse :: proc(ui: ^Json_Ui, method: string, params: Json_Array) -> 
 		if !line_ok || !column_ok {
 			return .Bad_Mouse
 		}
-		ui.on_key(Keys_Key{keys_MOD_MOUSE_POS, keys_encode_coord(Keys_Coord{line, column})})
+		ui.on_key.call(ui.on_key.data, Keys_Key{keys_MOD_MOUSE_POS, keys_encode_coord(Keys_Coord{line, column})})
 		return .None
 	}
 	if len(params) != 3 {
@@ -772,7 +772,7 @@ json_ui_eval_mouse :: proc(ui: ^Json_Ui, method: string, params: Json_Array) -> 
 	if method == "mouse_press" {
 		event = keys_MOD_MOUSE_PRESS
 	}
-	ui.on_key(Keys_Key{event | keys_button_modifier(button), keys_encode_coord(Keys_Coord{line, column})})
+	ui.on_key.call(ui.on_key.data, Keys_Key{event | keys_button_modifier(button), keys_encode_coord(Keys_Coord{line, column})})
 	return .None
 }
 
@@ -810,8 +810,8 @@ json_ui_eval :: proc(ui: ^Json_Ui, value: Json_Value) -> Json_Ui_Error {
 		if !ok {
 			return .Bad_Paste
 		}
-		if ui.on_paste != nil {
-			ui.on_paste(text)
+		if ui.on_paste.call != nil {
+			ui.on_paste.call(ui.on_paste.data, text)
 		}
 		return .None
 	case "mouse_move", "mouse_press", "mouse_release":
@@ -826,7 +826,7 @@ json_ui_eval :: proc(ui: ^Json_Ui, value: Json_Value) -> Json_Ui_Error {
 		if !amount_ok || !line_ok || !column_ok {
 			return .Bad_Scroll
 		}
-		ui.on_key(
+		ui.on_key.call(ui.on_key.data, 
 			Keys_Key {
 				keys_MOD_SCROLL | Keys_Modifiers(i32(amount) << 16),
 				keys_encode_coord(Keys_Coord{line, column}),
@@ -841,7 +841,7 @@ json_ui_eval :: proc(ui: ^Json_Ui, value: Json_Value) -> Json_Ui_Error {
 		if !ok {
 			return .Bad_Menu_Select
 		}
-		ui.on_key(Keys_Key{keys_MOD_MENU_SELECT, rune(index)})
+		ui.on_key.call(ui.on_key.data, Keys_Key{keys_MOD_MENU_SELECT, rune(index)})
 		return .None
 	case "resize":
 		if len(params) != 2 {
@@ -853,7 +853,7 @@ json_ui_eval :: proc(ui: ^Json_Ui, value: Json_Value) -> Json_Ui_Error {
 			return .Bad_Resize
 		}
 		ui.dimensions = Coord_Display{Coord_Line(line), Coord_Column(column)}
-		ui.on_key(keys_resize(Keys_Coord{line, column}))
+		ui.on_key.call(ui.on_key.data, keys_resize(Keys_Coord{line, column}))
 		return .None
 	case:
 		return .Unknown_Method

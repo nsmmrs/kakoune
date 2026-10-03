@@ -2479,6 +2479,7 @@ input_handler_deinit :: proc(h: ^Input_Handler) {
 	for mode in h.mode_stack {
 		input_handler_destroy_mode(h, mode)
 	}
+	input_handler_clear_key_error(h)
 	delete(h.mode_stack)
 	delete(h.last_insert.keys)
 	delete(h.recorded_keys)
@@ -2501,8 +2502,11 @@ input_handler_push_mode :: proc(h: ^Input_Handler, new_mode: ^Input_Mode) {
 	current.vtable.on_disabled(current.data, true)
 	append(&h.mode_stack, new_mode)
 	new_mode.vtable.on_enabled(new_mode.data, false)
+	// on_enabled may push or pop further modes, so name the current
+	// top like the C++ does instead of the captured mode.
+	top := h.mode_stack[len(h.mode_stack) - 1]
 	hooks := context_hooks(&h.ctx)
-	param, _ := format_format("push:{}:{}", []string{prev_name, new_mode.vtable.name(new_mode.data)}, context.temp_allocator)
+	param, _ := format_format("push:{}:{}", []string{prev_name, top.vtable.name(top.data)}, context.temp_allocator)
 	hook_manager_run_hook(hooks, .Mode_Change, param, &h.ctx)
 }
 
@@ -2512,12 +2516,17 @@ input_handler_pop_mode :: proc(h: ^Input_Handler, mode: ^Input_Mode) {
 	// Keep the mode alive across the hook (the C++ keep_alive);
 	// destroy it after the hook when no guard holds it.
 	current := h.mode_stack[len(h.mode_stack) - 1]
+	current_name := current.vtable.name(current.data)
 	current.vtable.on_disabled(current.data, false)
 	pop(&h.mode_stack)
+	top := h.mode_stack[len(h.mode_stack) - 1]
+	top.vtable.on_enabled(top.data, true)
+	// on_enabled may pop again (single-command normal resolving
+	// Pop_On_Enabled destroys top), so name the current top like
+	// the C++ does instead of the captured mode.
 	next := h.mode_stack[len(h.mode_stack) - 1]
-	next.vtable.on_enabled(next.data, true)
 	hooks := context_hooks(&h.ctx)
-	param, _ := format_format("pop:{}:{}", []string{current.vtable.name(current.data), next.vtable.name(next.data)}, context.temp_allocator)
+	param, _ := format_format("pop:{}:{}", []string{current_name, next.vtable.name(next.data)}, context.temp_allocator)
 	hook_manager_run_hook(hooks, .Mode_Change, param, &h.ctx)
 	if !input_handler_mode_guarded(current) {
 		input_handler_destroy_mode(h, current)
@@ -2649,6 +2658,35 @@ input_handler_record_key :: proc(h: ^Input_Handler, key: Keys_Key) {
 
 input_handler_record_key_apply :: proc(ctx: rawptr, key: Keys_Key) {
 	input_handler_record_key(cast(^Input_Handler)(ctx), key)
+}
+
+// input_handler_set_key_error records a key-handling failure for
+// exec() to report (C++: the exception escaping handle_key). Clones
+// msg with the handler allocator, replacing any pending error.
+input_handler_set_key_error :: proc(h: ^Input_Handler, kind: Commands_Error, msg: string) {
+	input_handler_clear_key_error(h)
+	h.pending_key_error = Input_Handler_Key_Error{kind = kind, msg = strings.clone(msg, h.allocator)}
+}
+
+// input_handler_clear_key_error drops a pending key error, if any.
+input_handler_clear_key_error :: proc(h: ^Input_Handler) {
+	if err, ok := h.pending_key_error.?; ok {
+		delete(err.msg, h.allocator)
+		h.pending_key_error = nil
+	}
+}
+
+// input_handler_take_key_error takes a pending key error, cloning it
+// into allocator for the caller (which frees it there).
+input_handler_take_key_error :: proc(h: ^Input_Handler, allocator: mem.Allocator) -> (Commands_Error, string, bool) {
+	err, ok := h.pending_key_error.?
+	if !ok {
+		return .None, "", false
+	}
+	msg := strings.clone(err.msg, allocator)
+	delete(err.msg, h.allocator)
+	h.pending_key_error = nil
+	return err.kind, msg, true
 }
 
 input_handler_drop_last_recorded_key :: proc(h: ^Input_Handler) {

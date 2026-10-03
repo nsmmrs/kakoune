@@ -2507,8 +2507,8 @@ terminal_ui_init_tty :: proc(ui: ^Terminal_UI) -> Terminal_UI_Error {
 // terminal_ui_suspend suspends on SIGTSTP and restores the terminal on
 // resume (port of suspend).
 terminal_ui_suspend :: proc(ui: ^Terminal_UI) {
-	if ui.on_key != nil {
-		ui.on_key(Keys_Key{key = keys_FOCUS_OUT})
+	if ui.on_key.call != nil {
+		ui.on_key.call(ui.on_key.data, Keys_Key{key = keys_FOCUS_OUT})
 	}
 	mouse_enabled := ui.mouse_enabled
 	terminal_ui_enable_mouse(ui, false)
@@ -2536,8 +2536,8 @@ terminal_ui_suspend :: proc(ui: ^Terminal_UI) {
 	terminal_ui_enable_mouse(ui, mouse_enabled)
 	terminal_ui_refresh(ui, true)
 	terminal_ui_flush(ui)
-	if ui.on_key != nil {
-		ui.on_key(Keys_Key{key = keys_FOCUS_IN})
+	if ui.on_key.call != nil {
+		ui.on_key.call(ui.on_key.data, Keys_Key{key = keys_FOCUS_IN})
 	}
 }
 
@@ -2601,7 +2601,7 @@ terminal_ui_drain_stdin :: proc(ui: ^Terminal_UI) {
 // terminal_ui_dispatch_available polls final input and runs the key and
 // paste callbacks (port of the stdin watcher body).
 terminal_ui_dispatch_available :: proc(ui: ^Terminal_UI, allocator := context.allocator) {
-	if ui.on_key == nil {
+	if ui.on_key.call == nil {
 		return
 	}
 	for {
@@ -2614,11 +2614,11 @@ terminal_ui_dispatch_available :: proc(ui: ^Terminal_UI, allocator := context.al
 			if ev.modifiers == keys_MOD_CONTROL && ev.key == 'z' {
 				posix.kill(0, .SIGTSTP)
 			} else if ev.key != keys_INVALID {
-				ui.on_key(ev)
+				ui.on_key.call(ui.on_key.data, ev)
 			}
 		case Terminal_UI_Paste:
-			if ui.on_paste != nil {
-				ui.on_paste(ev.content)
+			if ui.on_paste.call != nil {
+				ui.on_paste.call(ui.on_paste.data, ev.content)
 			}
 			delete(ev.content, allocator)
 		}

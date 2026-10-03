@@ -65,12 +65,19 @@ User_Interface_Status_Style :: enum {
 User_Interface_Options :: map[string]string
 
 // User_Interface_On_Key_Callback receives a pressed key (port of C++
-// OnKeyCallback).
-User_Interface_On_Key_Callback :: #type proc(key: Keys_Key)
+// OnKeyCallback, whose lambda captures the client; data plays that
+// role here).
+User_Interface_On_Key_Callback :: struct {
+	call: proc(data: rawptr, key: Keys_Key),
+	data: rawptr,
+}
 
 // User_Interface_On_Paste_Callback receives pasted text (port of C++
 // OnPasteCallback).
-User_Interface_On_Paste_Callback :: #type proc(content: string)
+User_Interface_On_Paste_Callback :: struct {
+	call: proc(data: rawptr, content: string),
+	data: rawptr,
+}
 
 // User_Interface_VTable is the procedure table implementing the UI
 // contract (port of the C++ UserInterface virtual methods). Every

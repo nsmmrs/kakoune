@@ -227,7 +227,12 @@ test_remainders_register_singleton :: proc(t: ^testing.T) {
 	register_manager_set(reg, &ctx, []string{"one", "two"})
 
 	vals := register_manager_get_strings("a", &ctx)
-	defer delete(vals)
+	defer {
+		for v in vals {
+			delete(v)
+		}
+		delete(vals)
+	}
 	testing.expect_value(t, len(vals), 2)
 	testing.expect_value(t, vals[0], "one")
 	testing.expect_value(t, vals[1], "two")

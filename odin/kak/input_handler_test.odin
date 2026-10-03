@@ -384,3 +384,137 @@ test_input_handler_selections :: proc(t: ^testing.T) {
 	testing.expect(t, sel.anchor == Coord_Buffer{line = 9, column = 9})
 	testing.expect(t, sel.cursor.coord == Coord_Buffer{})
 }
+
+// input_handler_test_pop_state is shared fake-mode state for the
+// reentrant-pop test below.
+input_handler_test_pop_state :: struct {
+	middle_destroyed:          bool,
+	middle_named_after_destroy: bool,
+	destroy_count:             int,
+}
+
+// input_handler_test_fake_mode is a minimal mode whose on_enabled can
+// pop itself, mimicking single-command normal resolving Pop_On_Enabled.
+input_handler_test_fake_mode :: struct {
+	h:              ^Input_Handler,
+	self:           ^Input_Mode,
+	state:          ^input_handler_test_pop_state,
+	name:           string,
+	pop_on_enabled: bool,
+	is_middle:      bool,
+}
+
+input_handler_test_fake_on_disabled :: proc(data: rawptr, from_push: bool) {
+	_ = data
+	_ = from_push
+}
+
+input_handler_test_fake_on_enabled :: proc(data: rawptr, from_pop: bool) {
+	f := cast(^input_handler_test_fake_mode)(data)
+	if f.pop_on_enabled && from_pop {
+		input_handler_pop_mode(f.h, f.self)
+	}
+}
+
+input_handler_test_fake_name :: proc(data: rawptr) -> string {
+	f := cast(^input_handler_test_fake_mode)(data)
+	if f.is_middle && f.state.middle_destroyed {
+		f.state.middle_named_after_destroy = true
+	}
+	return f.name
+}
+
+input_handler_test_fake_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
+	_ = allocator
+	f := cast(^input_handler_test_fake_mode)(data)
+	if f.is_middle {
+		f.state.middle_destroyed = true
+	}
+	f.state.destroy_count += 1
+}
+
+input_handler_test_fake_vtable := Input_Mode_VTable{
+	on_disabled = input_handler_test_fake_on_disabled,
+	on_enabled  = input_handler_test_fake_on_enabled,
+	name        = input_handler_test_fake_name,
+	destroy     = input_handler_test_fake_destroy,
+}
+
+@(test)
+test_input_handler_pop_mode_reentrant_pop :: proc(t: ^testing.T) {
+	h := Input_Handler{allocator = context.allocator}
+	context_init_empty(&h.ctx, context.allocator)
+	defer context_destroy(&h.ctx)
+	// run_hook needs the disabled_hooks/debug options on the scope.
+	scope := scope_make(context.allocator)
+	reg: Options_Registry
+	option_manager_registry_init(&reg, &scope.data.options)
+	// Destroy the scope (owning the options) before the registry
+	// (owning the descs the options borrow).
+	defer option_manager_registry_destroy(&reg)
+	defer scope_destroy(&scope)
+	_, derr := option_manager_registry_declare(&reg, "disabled_hooks", "", Regex{})
+	testing.expect_value(t, derr, Option_Manager_Error.None)
+	_, berr := option_manager_registry_declare(&reg, "debug", "", Option_types_Debug_Flags{})
+	testing.expect_value(t, berr, Option_Manager_Error.None)
+	append(&h.ctx.local_scopes, &scope)
+	defer delete(h.mode_stack)
+
+	state: input_handler_test_pop_state
+	bottom_data := input_handler_test_fake_mode{h = &h, state = &state, name = "bottom"}
+	middle_data := input_handler_test_fake_mode{
+		h = &h, state = &state, name = "middle", pop_on_enabled = true, is_middle = true,
+	}
+	top_data := input_handler_test_fake_mode{h = &h, state = &state, name = "top"}
+	bottom := new(Input_Mode)
+	bottom.vtable = &input_handler_test_fake_vtable
+	bottom.input_handler = &h
+	bottom.data = &bottom_data
+	bottom_data.self = bottom
+	middle := new(Input_Mode)
+	middle.vtable = &input_handler_test_fake_vtable
+	middle.input_handler = &h
+	middle.data = &middle_data
+	middle_data.self = middle
+	top := new(Input_Mode)
+	top.vtable = &input_handler_test_fake_vtable
+	top.input_handler = &h
+	top.data = &top_data
+	top_data.self = top
+	append(&h.mode_stack, bottom, middle, top)
+
+	// Popping top enables middle, which pops itself; the outer pop
+	// must name the surviving bottom for the hook, never the freed
+	// middle.
+	input_handler_pop_mode(&h, top)
+	testing.expect(t, !state.middle_named_after_destroy, "pop_mode used the mode destroyed by a reentrant pop")
+	testing.expect_value(t, state.destroy_count, 2)
+	testing.expect_value(t, len(h.mode_stack), 1)
+	testing.expect(t, h.mode_stack[0] == bottom)
+	input_handler_destroy_mode(&h, bottom)
+}
+
+@(test)
+test_input_handler_key_error_slot :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+	h := Input_Handler{allocator = alloc}
+	_, _, ok := input_handler_take_key_error(&h, alloc)
+	testing.expect(t, !ok)
+	// Set/take round-trips through the caller allocator.
+	input_handler_set_key_error(&h, .Error, "boom")
+	err, msg, ok2 := input_handler_take_key_error(&h, alloc)
+	testing.expect(t, ok2)
+	testing.expect_value(t, err, Commands_Error.Error)
+	testing.expect_value(t, msg, "boom")
+	delete(msg, alloc)
+	// Set replaces; clear drops without leaking.
+	input_handler_set_key_error(&h, .Fail, "one")
+	input_handler_set_key_error(&h, .Fail, "two")
+	input_handler_clear_key_error(&h)
+	_, _, ok3 := input_handler_take_key_error(&h, alloc)
+	testing.expect(t, !ok3)
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

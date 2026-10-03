@@ -114,12 +114,14 @@ user_interface_test_seen_key_count: int
 user_interface_test_seen_paste: string
 user_interface_test_seen_paste_count: int
 
-user_interface_test_on_key :: proc(key: Keys_Key) {
+user_interface_test_on_key :: proc(data: rawptr, key: Keys_Key) {
+	_ = data
 	user_interface_test_seen_key = key
 	user_interface_test_seen_key_count += 1
 }
 
-user_interface_test_on_paste :: proc(content: string) {
+user_interface_test_on_paste :: proc(data: rawptr, content: string) {
+	_ = data
 	user_interface_test_seen_paste = content
 	user_interface_test_seen_paste_count += 1
 }
@@ -215,15 +217,15 @@ test_user_interface_callbacks :: proc(t: ^testing.T) {
 	ui := user_interface_make(&stub, &user_interface_test_vtable)
 
 	key := Keys_Key{modifiers = keys_MOD_CONTROL, key = 'c'}
-	user_interface_set_on_key(&ui, user_interface_test_on_key)
-	testing.expect(t, stub.on_key != nil)
-	stub.on_key(key)
+	user_interface_set_on_key(&ui, {user_interface_test_on_key, nil})
+	testing.expect(t, stub.on_key.call != nil)
+	stub.on_key.call(stub.on_key.data, key)
 	testing.expect_value(t, user_interface_test_seen_key_count, 1)
 	testing.expect_value(t, user_interface_test_seen_key, key)
 
-	user_interface_set_on_paste(&ui, user_interface_test_on_paste)
-	testing.expect(t, stub.on_paste != nil)
-	stub.on_paste("pasted")
+	user_interface_set_on_paste(&ui, {user_interface_test_on_paste, nil})
+	testing.expect(t, stub.on_paste.call != nil)
+	stub.on_paste.call(stub.on_paste.data, "pasted")
 	testing.expect_value(t, user_interface_test_seen_paste_count, 1)
 	testing.expect_value(t, user_interface_test_seen_paste, "pasted")
 

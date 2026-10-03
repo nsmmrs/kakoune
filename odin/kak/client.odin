@@ -261,11 +261,8 @@ client_make :: proc(
 	ui_options := option_manager_get_checked(&window.data.options, "ui_options")
 	user_interface_set_ui_options(ui, User_Interface_Options(ui_options.value.(map[string]string)))
 
-	// GAP: set_on_key/set_on_paste cannot be wired: the merged
-	// User_Interface callbacks take no user data, so there is no way
-	// to reach c from them. The handler bodies live in
-	// client_handle_ui_key / client_handle_ui_paste for wiring once
-	// the API grows a data pointer.
+	user_interface_set_on_key(ui, User_Interface_On_Key_Callback{client_ui_on_key_shim, c})
+	user_interface_set_on_paste(ui, User_Interface_On_Paste_Callback{client_ui_on_paste_shim, c})
 
 	hook_manager_run_hook(&window.data.hooks, .Win_Display, buffer_name(window_buffer(window)), ctx)
 
@@ -589,6 +586,18 @@ client_handle_ui_key :: proc(c: ^Client, key: Keys_Key) -> (cancelled: bool) {
 // set_on_paste callback in the constructor).
 client_handle_ui_paste :: proc(c: ^Client, content: string) {
 	input_handler_paste(context_input_handler(client_context(c)), content)
+}
+
+// client_ui_on_key_shim adapts the UI key callback to the client
+// handler (data is the client).
+client_ui_on_key_shim :: proc(data: rawptr, key: Keys_Key) {
+	client_handle_ui_key(cast(^Client)(data), key)
+}
+
+// client_ui_on_paste_shim adapts the UI paste callback to the client
+// handler (data is the client).
+client_ui_on_paste_shim :: proc(data: rawptr, content: string) {
+	client_handle_ui_paste(cast(^Client)(data), content)
 }
 
 // client_process_pending_inputs dispatches the queued keys, stealing

@@ -746,7 +746,7 @@ insert_completer_update_inserted_ranges :: proc(c: ^Insert_Completer, buffer: ^B
 	if len(c.inserted_ranges) == 0 {
 		return
 	}
-	tmp := make([dynamic]Selection, len(c.inserted_ranges), context.temp_allocator)
+	tmp := make([dynamic]Selection, 0, len(c.inserted_ranges), context.temp_allocator)
 	for r in c.inserted_ranges {
 		append(
 			&tmp,
