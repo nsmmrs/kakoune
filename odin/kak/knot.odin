@@ -90,7 +90,7 @@ Option_Desc :: struct {
 
 // Option_Value is the closed set of option value types: every
 // declare_option instantiation in src/main.cc (25 builtins, including
-// deduced types) plus the 10 :declare-option value types in
+// deduced types) plus the 9 :declare-option value types in
 // src/commands.cc. Replaces TypedOption<T>.
 Option_Value :: union {
 	int,

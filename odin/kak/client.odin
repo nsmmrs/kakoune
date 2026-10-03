@@ -248,7 +248,7 @@ client_make :: proc(
 	window_set_dimensions(window, user_interface_dimensions(ui))
 	option_manager_register_watcher(&window.data.options, client_option_watcher(c))
 
-	ui_options := option_manager_get(&window.data.options, "ui_options")
+	ui_options := option_manager_get_checked(&window.data.options, "ui_options")
 	user_interface_set_ui_options(ui, User_Interface_Options(ui_options.value.(map[string]string)))
 
 	// GAP: set_on_key/set_on_paste cannot be wired: the merged
@@ -578,8 +578,8 @@ client_handle_ui_paste :: proc(c: ^Client, content: string) {
 // handler that path is unported (see the module note).
 client_process_pending_inputs :: proc(c: ^Client) -> bool {
 	ctx := client_context(c)
-	debug_opt := option_manager_get(context_options(ctx), "debug")
-	debug_keys := .Keys in option_get_debug_flags(debug_opt)
+	debug_opt := option_manager_get_checked(context_options(ctx), "debug")
+	debug_keys := .Keys in debug_opt.value.(Option_types_Debug_Flags)
 	window_run_resize_hook_ifn(c.window)
 	// Steal keys as we might receive new keys while handling them.
 	keys := c.pending_keys
@@ -767,7 +767,7 @@ client_redraw_ifn :: proc(c: ^Client) {
 client_generate_mode_line :: proc(c: ^Client, allocator := context.allocator) -> Display_Line {
 	ctx := client_context(c)
 	info := input_handler_mode_info(&c.input_handler, allocator)
-	modelinefmt_opt := option_manager_get(context_options(ctx), "modelinefmt")
+	modelinefmt_opt := option_manager_get_checked(context_options(ctx), "modelinefmt")
 	modelinefmt := modelinefmt_opt.value.(string)
 	atoms := make(map[string]Display_Line, 2, allocator)
 	defer delete(atoms)
@@ -910,7 +910,7 @@ client_change_buffer :: proc(c: ^Client, buffer: ^Buffer, set_selections: Maybe(
 	context_set_window(ctx, c.window)
 
 	window_set_dimensions(c.window, user_interface_dimensions(c.ui))
-	ui_options := option_manager_get(&c.window.data.options, "ui_options")
+	ui_options := option_manager_get_checked(&c.window.data.options, "ui_options")
 	user_interface_set_ui_options(c.ui, User_Interface_Options(ui_options.value.(map[string]string)))
 
 	hook_manager_run_hook(&c.window.data.hooks, .Win_Display, buffer_name(buffer), ctx)
@@ -942,12 +942,16 @@ client_reload_buffer :: proc(c: ^Client) {
 // (port of the set_autoreload lambda in on_buffer_reload_key).
 client_set_autoreload :: proc(c: ^Client, autoreload: Autoreload) {
 	ctx := client_context(c)
-	option := option_manager_get(context_options(ctx), "autoreload")
+	option := option_manager_get_checked(context_options(ctx), "autoreload")
 	// Do not touch global autoreload, set it at least at buffer level
-	if option.manager == &global_scope_instance().data.options {
-		option = option_manager_get_local(&context_buffer(ctx).data.options, "autoreload")
+	if option.manager == &scope_global_instance().data.options {
+		buf_mgr := &context_buffer(ctx).scope.data.options
+		local_opt, get_err := option_manager_get_local_option(buf_mgr, "autoreload", buf_mgr.allocator)
+		assert(get_err == .None)
+		option = local_opt
 	}
-	option_set_autoreload(option, autoreload)
+	set_err, _ := option_manager_option_set(option, autoreload, true)
+	assert(set_err == .None)
 }
 
 // client_on_buffer_reload_key handles one reload-dialog key (port of
@@ -1027,7 +1031,8 @@ client_check_if_buffer_needs_reloading :: proc(c: ^Client) {
 	}
 	ctx := client_context(c)
 	buffer := context_buffer(ctx)
-	reload := option_get_autoreload(option_manager_get(context_options(ctx), "autoreload"))
+		autoreload_opt := option_manager_get_checked(context_options(ctx), "autoreload")
+	reload := autoreload_opt.value.(Autoreload)
 	if .File not_in buffer.flags || reload == .No {
 		return
 	}
@@ -1302,32 +1307,8 @@ scoped_selection_edition_destroy :: proc(e: ^Scoped_Selection_Edition) {
 	panic("STUB: scoped_selection_edition_destroy")
 }
 
-option_manager_get :: proc(m: ^Option_Manager, name: string) -> ^Option {
-	panic("STUB: option_manager_get")
-}
-
-option_manager_get_local :: proc(m: ^Option_Manager, name: string) -> ^Option {
-	panic("STUB: option_manager_get_local")
-}
-
-option_manager_register_watcher :: proc(m: ^Option_Manager, w: Option_Watcher) {
-	panic("STUB: option_manager_register_watcher")
-}
-
-option_manager_unregister_watcher :: proc(m: ^Option_Manager, w: Option_Watcher) {
-	panic("STUB: option_manager_unregister_watcher")
-}
-
 option_get_debug_flags :: proc(o: ^Option) -> Option_types_Debug_Flags {
 	panic("STUB: option_get_debug_flags")
-}
-
-option_get_autoreload :: proc(o: ^Option) -> Autoreload {
-	panic("STUB: option_get_autoreload")
-}
-
-option_set_autoreload :: proc(o: ^Option, value: Autoreload) {
-	panic("STUB: option_set_autoreload")
 }
 
 global_scope_instance :: proc() -> ^Global_Scope {

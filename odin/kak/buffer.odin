@@ -1489,7 +1489,7 @@ buffer_on_option_changed :: proc(b: ^Buffer, option: ^Option, allocator := conte
 			b.flags = b.flags - Buffer_Flags{.Read_Only}
 		}
 	}
-	desc := option_desc_string(option, allocator)
+	desc := option_manager_option_get_desc_string(option, allocator)
 	defer delete(desc, allocator)
 	param := strings.concatenate({option.desc.name, "=", desc}, context.temp_allocator)
 	buffer_run_hook_in_own_context(b, .Buf_Set_Option, param)
@@ -1504,7 +1504,8 @@ buffer_on_registered :: proc(b: ^Buffer, allocator := context.allocator) {
 	}
 	option_manager_register_watcher(&b.scope.data.options, Option_Watcher{data = b, on_option_changed = buffer_option_watcher_callback})
 	if .No_Hooks in b.flags {
-		buffer_on_option_changed(b, option_manager_get(&b.scope.data.options, "readonly"))
+		readonly_opt := option_manager_get_checked(&b.scope.data.options, "readonly")
+		buffer_on_option_changed(b, readonly_opt)
 		return
 	}
 	b.flags = b.flags + Buffer_Flags{.No_Buf_Set_Option}
@@ -1538,14 +1539,6 @@ buffer_on_unregistered :: proc(b: ^Buffer) {
 // --- Stubs for procs owned by unmerged modules. Each body is exactly
 // one panic line per the STUB protocol; the coordinator deletes the stub
 // when the real proc merges. ---
-
-option_manager_flatten_options :: proc(m: ^Option_Manager, allocator := context.allocator) -> [dynamic]^Option {
-	panic("STUB: option_manager_flatten_options")
-}
-
-option_desc_string :: proc(o: ^Option, allocator := context.allocator) -> string {
-	panic("STUB: option_desc_string")
-}
 
 buffer_manager_get_buffer_ifp :: proc(name: string) -> ^Buffer {
 	panic("STUB: buffer_manager_get_buffer_ifp")

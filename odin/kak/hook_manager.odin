@@ -170,7 +170,8 @@ hook_manager_exec :: proc(
 	captures: ^Regex_Match_Results,
 	allocator := context.allocator,
 ) -> (Command_Manager_Error, string) {
-	debug_flags := option_manager_get_debug_flags(option_manager_get(context_options(ctx), "debug"))
+	debug_opt := option_manager_get_checked(context_options(ctx), "debug")
+	debug_flags := debug_opt.value.(Option_types_Debug_Flags)
 	if .Hooks in debug_flags {
 		hook_manager_debug_write({"hook ", hook_manager_hook_name(hook), "(", param, ")/", data.group}, allocator)
 	}
@@ -224,7 +225,7 @@ hook_manager_add_hook :: proc(
 	data.commands = strings.clone(commands, m.allocator)
 	if hook == .Module_Loaded {
 		only_always := utils_nested_bool_is_set(ctx.hooks_disabled)
-		disabled_opt := option_manager_get(context_options(ctx), "disabled_hooks")
+		disabled_opt := option_manager_get_checked(context_options(ctx), "disabled_hooks")
 		disabled := disabled_opt.value.(Regex)
 		modules := command_manager_loaded_modules(command_manager_instance())
 		defer {
@@ -304,9 +305,10 @@ hook_manager_complete_hook_group :: proc(
 // propagates.
 hook_manager_run_hook :: proc(m: ^Hook_Manager, hook: Hook, param: string, ctx: ^Context) {
 	only_always := utils_nested_bool_is_set(ctx.hooks_disabled)
-	disabled_opt := option_manager_get(context_options(ctx), "disabled_hooks")
+	disabled_opt := option_manager_get_checked(context_options(ctx), "disabled_hooks")
 	disabled := disabled_opt.value.(Regex)
-	debug_flags := option_manager_get_debug_flags(option_manager_get(context_options(ctx), "debug"))
+	debug_opt := option_manager_get_checked(context_options(ctx), "debug")
+	debug_flags := debug_opt.value.(Option_types_Debug_Flags)
 
 	to_run := make([dynamic]Hook_Manager_To_Run, 0, context.allocator)
 	defer {

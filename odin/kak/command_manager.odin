@@ -549,8 +549,14 @@ command_manager_expand_token_single :: proc(
 		delete(content, allocator)
 		return out, .None, ""
 	case .Option_Expand:
-		opt := option_manager_get(context_options(ctx), content)
-		out := option_get_as_string(opt, .Raw, allocator)
+		opt, get_err := option_manager_get_option(context_options(ctx), content)
+		if get_err != .None {
+			parts := [3]string{"option not found: '", content, "'. Use declare-option first"}
+			msg := strings.concatenate(parts[:], allocator)
+			delete(content, allocator)
+			return "", .Error, msg
+		}
+		out := option_manager_option_get_as_string(opt, .Raw, allocator)
 		delete(content, allocator)
 		return out, .None, ""
 	case .Val_Expand:
@@ -636,8 +642,14 @@ command_manager_expand_token_multi :: proc(
 		delete(vals)
 		return .None, ""
 	case .Option_Expand:
-		opt := option_manager_get(context_options(ctx), content)
-		strs := option_get_as_strings(opt, allocator)
+		opt, get_err := option_manager_get_option(context_options(ctx), content)
+		if get_err != .None {
+			parts := [3]string{"option not found: '", content, "'. Use declare-option first"}
+			msg := strings.concatenate(parts[:], allocator)
+			delete(content, allocator)
+			return .Error, msg
+		}
+		strs := option_manager_option_get_as_strings(opt, allocator)
 		delete(content, allocator)
 		for s in strs {
 			append(params, s)
@@ -993,7 +1005,8 @@ command_manager_execute_single_command :: proc(
 		return .Error, strings.clone("no such command", allocator)
 	}
 
-	debug_flags := option_manager_get_debug_flags(option_manager_get(context_options(ctx), "debug"))
+	debug_opt := option_manager_get_checked(context_options(ctx), "debug")
+	debug_flags := debug_opt.value.(Option_types_Debug_Flags)
 	if .Commands in debug_flags {
 		joined := string_utils_join_char(params, ' ', true, allocator)
 		defer delete(joined, allocator)
@@ -1036,8 +1049,17 @@ command_manager_execute :: proc(
 	allocator := context.allocator,
 ) -> (Command_Manager_Error, string) {
 	parser := command_manager_parser_make(command_line)
-	scope := local_scope_make(ctx)
-	defer local_scope_destroy(&scope)
+	// C++ Context::scope parity: innermost local scope, else window
+	// scope, else global. (The buffer fallback needs unmerged context
+	// procs; every real context here has a window.)
+	parent_scope := &scope_global_instance().scope
+	if len(ctx.local_scopes) > 0 {
+		parent_scope = ctx.local_scopes[len(ctx.local_scopes) - 1]
+	} else if ctx.window != nil {
+		parent_scope = &ctx.window.scope
+	}
+	scope := scope_local_make(ctx, parent_scope, allocator)
+	defer scope_local_destroy(scope, allocator)
 	command_pos := 0
 	params := make([dynamic]string, 0, allocator)
 	defer {
@@ -1212,10 +1234,10 @@ command_manager_complete_command_name :: proc(
 			append(&names, name)
 		}
 	}
-	alias_names := alias_registry_flatten_alias_names(context_aliases(ctx), allocator)
-	defer delete(alias_names)
-	for a in alias_names {
-		append(&names, a)
+	flat_aliases := alias_registry_flatten(context_aliases(ctx), allocator)
+	defer delete(flat_aliases)
+	for e in flat_aliases {
+		append(&names, e.alias)
 	}
 	candidates := completion_complete_strings(query, Units_ByteCount(len(query)), names[:], allocator)
 	return Completions{candidates = candidates, start = 0, end = Units_ByteCount(len(query)), flags = {.Menu, .No_Empty}}
@@ -1253,7 +1275,7 @@ command_manager_complete_expansion :: proc(
 		candidates := register_manager_complete_register_name(token.content, pos_in_token, allocator)
 		return Completions{candidates = candidates, start = start, end = cursor_pos}, .None, ""
 	case .Option_Expand:
-		candidates := options_registry_complete_option_name(global_scope_option_registry(), token.content, pos_in_token, allocator)
+		candidates := option_manager_registry_complete_name(scope_global_option_registry(scope_global_instance()), token.content, pos_in_token, allocator)
 		return Completions{candidates = candidates, start = start, end = cursor_pos}, .None, ""
 	case .Shell_Expand:
 		completions := completion_shell_complete(ctx, token.content, pos_in_token, allocator)
@@ -1262,7 +1284,7 @@ command_manager_complete_expansion :: proc(
 		candidates := shell_manager_complete_env_var(token.content, pos_in_token, allocator)
 		return Completions{candidates = candidates, start = start, end = cursor_pos}, .None, ""
 	case .File_Expand:
-		opt := option_manager_get(context_options(ctx), "ignored_files")
+		opt := option_manager_get_checked(context_options(ctx), "ignored_files")
 		ignored := opt.value.(Regex)
 		candidates := completion_complete_filename(token.content, &ignored, pos_in_token, {.Expand}, allocator)
 		return Completions{candidates = candidates, start = start, end = cursor_pos}, .None, ""
@@ -1566,10 +1588,6 @@ debug_write_to_debug_buffer :: proc(str: string) {
 // C++ Option::get<DebugFlags> (option_manager.hh). NOTE: knot.odin's
 // Option_Value union has no DebugFlags variant (see the final report),
 // so typed reads go through this stub until the union grows one.
-option_manager_get_debug_flags :: proc(opt: ^Option) -> Option_types_Debug_Flags {
-	panic("STUB: option_manager_get_debug_flags")
-}
-
 // C++ complete() template (completion.hh), adapted to []string: rank the
 // borrowed candidates against query and return the owned winners.
 completion_complete_strings :: proc(query: string, cursor_pos: Units_ByteCount, candidates: []string, allocator := context.allocator) -> Candidate_List {
@@ -1583,16 +1601,8 @@ context_aliases :: proc(ctx: ^Context) -> ^Alias_Registry {
 
 // C++ AliasRegistry::operator[] (alias_registry.hh). Borrowed result, ""
 // when the alias is undefined.
-alias_registry_get :: proc(reg: ^Alias_Registry, alias: string) -> string {
-	panic("STUB: alias_registry_get")
-}
-
 // C++ AliasRegistry::aliases_for (alias_registry.hh). Borrowed names in
 // an owned list.
-alias_registry_aliases_for :: proc(reg: ^Alias_Registry, command: string, allocator := context.allocator) -> [dynamic]string {
-	panic("STUB: alias_registry_aliases_for")
-}
-
 // C++ AliasRegistry::flatten_aliases (alias_registry.hh), names only:
 // borrowed names in an owned list.
 alias_registry_flatten_alias_names :: proc(reg: ^Alias_Registry, allocator := context.allocator) -> [dynamic]string {

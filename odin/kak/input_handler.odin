@@ -493,14 +493,14 @@ input_handler_selection_from_coord :: proc(c: Coord_Buffer) -> Selection {
 // input_handler_idle_timeout reads the idle_timeout option.
 input_handler_idle_timeout :: proc(ctx: ^Context) -> time.Duration {
 	opts := context_options(ctx)
-	opt := option_manager_get(opts, "idle_timeout")
+	opt := option_manager_get_checked(opts, "idle_timeout")
 	return time.Duration(opt.value.(int)) * time.Millisecond
 }
 
 // input_handler_fs_check_timeout reads the fs_check_timeout option.
 input_handler_fs_check_timeout :: proc(ctx: ^Context) -> time.Duration {
 	opts := context_options(ctx)
-	opt := option_manager_get(opts, "fs_check_timeout")
+	opt := option_manager_get_checked(opts, "fs_check_timeout")
 	return time.Duration(opt.value.(int)) * time.Millisecond
 }
 
@@ -928,7 +928,7 @@ input_handler_normal_on_key :: proc(data: rawptr, key_: Keys_Key) {
 		do_restore_hooks = true
 		if command, found := normal_get_command(key); found {
 			opts := context_options(ctx)
-			autoinfo := input_handler_option_auto_info(option_manager_get(opts, "autoinfo"))
+			autoinfo := input_handler_option_auto_info(option_manager_get_checked(opts, "autoinfo"))
 			if .Normal in autoinfo && ctx.client != nil {
 				key_str := keys_to_string_key(key, context.temp_allocator)
 				client_info_show_string(ctx.client, key_str, command.docstring, Coord_Buffer{}, .Prompt)
@@ -1112,7 +1112,7 @@ input_handler_prompt_make :: proc(h: ^Input_Handler, prompt: string, initstr, em
 	p.history = register_manager_instance().registers[history_register]
 	p.current_history = -1
 	opts := context_options(&h.ctx)
-	p.auto_complete = .Prompt in input_handler_option_auto_complete(option_manager_get(opts, "autocomplete"))
+	p.auto_complete = .Prompt in input_handler_option_auto_complete(option_manager_get_checked(opts, "autocomplete"))
 	p.refresh_completion_pending = true
 	draft := .Draft in h.ctx.flags
 	p.idle = input_handler_timer_make(mode, .Prompt_Idle, clock_max(), !draft, h.allocator)
@@ -1380,7 +1380,7 @@ input_handler_prompt_explicit_complete :: proc(data: rawptr, ctx: ^Context, cont
 	switch d.kind {
 	case .Filename:
 		opts := context_options(ctx)
-		ignore := option_manager_get(opts, "ignored_files").value.(Regex)
+		ignore := option_manager_get_checked(opts, "ignored_files").value.(Regex)
 		candidates = completion_complete_filename(token_content, &ignore, Units_ByteCount(len(token_content)), Filename_Flags{.Expand}, allocator)
 	case .Words:
 		buffer := context_selections(ctx).buffer
@@ -1840,7 +1840,7 @@ input_handler_insert_make :: proc(h: ^Input_Handler, mode: Input_Handler_Insert_
 	ins.last_insert = last_insert
 	ins.restore_cursor = mode == .Append
 	opts := context_options(&h.ctx)
-	ins.auto_complete = .Insert in input_handler_option_auto_complete(option_manager_get(opts, "autocomplete"))
+	ins.auto_complete = .Insert in input_handler_option_auto_complete(option_manager_get_checked(opts, "autocomplete"))
 	draft := .Draft in h.ctx.flags
 	ins.idle = input_handler_timer_make(m, .Insert_Idle, clock_max(), !draft, h.allocator)
 	ins.disable_hooks = utils_scoped_bool_make(&h.ctx.hooks_disabled, utils_nested_bool_is_set(h.ctx.hooks_disabled))
@@ -1916,7 +1916,7 @@ input_handler_insert_move_chars :: proc(ins: ^input_handler_Insert, offset: int)
 	ctx := &ins.handler.ctx
 	sels := context_selections(ctx)
 	opts := context_options(ctx)
-	tabstop := Units_ColumnCount(option_manager_get(opts, "tabstop").value.(int))
+	tabstop := Units_ColumnCount(option_manager_get_checked(opts, "tabstop").value.(int))
 	for &sel in sels.selections {
 		cursor := buffer_offset_coord_char(context_selections(ctx).buffer, sel.cursor.coord, Units_CharCount(offset), tabstop)
 		sel.anchor = cursor
@@ -1929,7 +1929,7 @@ input_handler_insert_move_lines :: proc(ins: ^input_handler_Insert, offset: int)
 	ctx := &ins.handler.ctx
 	sels := context_selections(ctx)
 	opts := context_options(ctx)
-	tabstop := Units_ColumnCount(option_manager_get(opts, "tabstop").value.(int))
+	tabstop := Units_ColumnCount(option_manager_get_checked(opts, "tabstop").value.(int))
 	for &sel in sels.selections {
 		cursor := buffer_offset_coord_line(context_selections(ctx).buffer, sel.cursor, Units_LineCount(offset), tabstop)
 		sel.anchor = cursor.coord
@@ -2726,7 +2726,7 @@ input_handler_scoped_force_normal_destroy :: proc(s: ^input_handler_Scoped_Force
 
 input_handler_should_show_info :: proc(mask: Auto_Info, ctx: ^Context) -> bool {
 	opts := context_options(ctx)
-	autoinfo := input_handler_option_auto_info(option_manager_get(opts, "autoinfo"))
+	autoinfo := input_handler_option_auto_info(option_manager_get_checked(opts, "autoinfo"))
 	return (autoinfo & mask) != Auto_Info{} && ctx.client != nil
 }
 
@@ -2815,7 +2815,7 @@ input_handler_scroll_window :: proc(ctx: ^Context, offset: Units_LineCount, on_h
 	}
 	max_offset := Coord_Display{line = (win_dim.line - 1) / 2, column = (win_dim.column - 1) / 2}
 	opts := context_options(ctx)
-	scrolloff_opt := option_manager_get(opts, "scrolloff").value.(Coord_Display)
+	scrolloff_opt := option_manager_get_checked(opts, "scrolloff").value.(Coord_Display)
 	scrolloff := Coord_Display{line = min(scrolloff_opt.line, max_offset.line), column = min(scrolloff_opt.column, max_offset.column)}
 	win_pos.line = clamp(win_pos.line + offset, Units_LineCount(0), line_count - 1)
 	window_set_position(window, win_pos)
@@ -2828,7 +2828,7 @@ input_handler_scroll_window :: proc(ctx: ^Context, offset: Units_LineCount, on_h
 		cursor := main.cursor
 		cursor_off := win_pos.line - window.position.line
 		line := clamp(cursor.line + cursor_off, win_pos.line + scrolloff.line, win_pos.line + win_dim.line - 1 - scrolloff.line)
-		tabstop := Units_ColumnCount(option_manager_get(opts, "tabstop").value.(int))
+		tabstop := Units_ColumnCount(option_manager_get_checked(opts, "tabstop").value.(int))
 		new_cursor := buffer_offset_coord_line(buffer, cursor, line - cursor.line, tabstop)
 		main.anchor = new_cursor.coord if on_hidden_cursor == .Move_Cursor_And_Anchor else anchor
 		main.cursor = new_cursor
