@@ -1624,22 +1624,6 @@ option_get_as_strings :: proc(opt: ^Option, allocator := context.allocator) -> [
 	panic("STUB: option_get_as_strings")
 }
 
-// C++ ShellManager::eval with empty stdin and WaitForStdout
-// (shell_manager.hh): the owned stdout.
-shell_manager_eval :: proc(cmdline: string, ctx: ^Context, shell_ctx: ^Shell_Context, allocator := context.allocator) -> string {
-	panic("STUB: shell_manager_eval")
-}
-
-// C++ ShellManager::get_val (shell_manager.hh). Owned strings.
-shell_manager_get_val :: proc(name: string, ctx: ^Context, allocator := context.allocator) -> [dynamic]string {
-	panic("STUB: shell_manager_get_val")
-}
-
-// C++ ShellManager::complete_env_var (shell_manager.hh).
-shell_manager_complete_env_var :: proc(prefix: string, cursor_pos: Units_ByteCount, allocator := context.allocator) -> Candidate_List {
-	panic("STUB: shell_manager_complete_env_var")
-}
-
 // C++ RegisterManager::operator[] + Register::get (register_manager.hh),
 // combined: the owned register values.
 register_manager_get_strings :: proc(reg: string, ctx: ^Context, allocator := context.allocator) -> [dynamic]string {
