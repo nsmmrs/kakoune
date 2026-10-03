@@ -5314,6 +5314,9 @@ commands_source :: proc(
 		commands_write_to_debug_buffer(msg, env.buffers, allocator)
 		delete(msg, allocator)
 	}
+	if exec_err == .Kill_Session {
+		return .Kill_Session, exec_msg
+	}
 	if exec_err != .None {
 		// C++ source_cmd unwinding: kill_session propagates without
 		// a debug note; other failures are logged, then propagate.
@@ -5701,6 +5704,8 @@ commands_execute_keys_body :: proc(
 		if kerr != .None {
 			return kerr, kmsg
 		}
+		failed := false
+		fail_msg := ""
 		for key in keys {
 			input_handler_handle_key(handler, key)
 			if fail_msg, fail_kind, failed := input_handler_take_key_error(handler, allocator); failed {
@@ -5712,6 +5717,9 @@ commands_execute_keys_body :: proc(
 			}
 		}
 		delete(keys)
+		if failed {
+			return .Error, fail_msg
+		}
 	}
 	return .None, ""
 }
@@ -6665,14 +6673,18 @@ commands_prompt_callback_call :: proc(
 	delete(val, stored.allocator)
 	delete(key, stored.allocator)
 	// C++ prompt callback boundary: kill_session unwinds silently
-	// (no report, no hook); other failures report and run
-	// RuntimeError. The error message is owned here.
+	// (no report, no hook); other failures report, run RuntimeError
+	// and record for the key loop like a main-loop catch (an
+	// enclosing exec aborts). The error message is owned here.
 	if exec_err == .None {
 		return
 	}
 	defer delete(exec_msg, ctx.allocator)
 	if exec_err == .Kill_Session {
 		return
+	}
+	if ctx.input_handler != nil {
+		input_handler_set_key_error(ctx.input_handler, exec_msg)
 	}
 	commands_report(exec_err, exec_msg, ctx)
 	hook_manager_run_hook(context_hooks(ctx), .Runtime_Error, exec_msg, ctx)
@@ -6889,15 +6901,21 @@ commands_user_mode_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 		keys_copy := make([dynamic]Keys_Key, len(mapping.keys), ctx.allocator)
 		defer delete(keys_copy)
 		copy(keys_copy[:], mapping.keys[:])
-		had_error := input_handler_has_key_error(ctx.input_handler)
+		// Drop a stale flag from earlier interactive keys (failures
+		// are terminal within a key, so nothing live can be pending).
+		input_handler_clear_key_error(ctx.input_handler)
 		for k in keys_copy {
 			input_handler_handle_key(ctx.input_handler, k)
-			if !had_error && input_handler_has_key_error(ctx.input_handler) {
+			// A C++ throw aborts the replay; the flag stays set so
+			// an enclosing exec aborts too.
+			if input_handler_has_key_error(ctx.input_handler) {
 				break
 			}
 		}
 	}
-	if stored.lock {
+	// A C++ throw unwinds past the lock re-enter; skip it when a
+	// replayed key failed.
+	if stored.lock && !input_handler_has_key_error(ctx.input_handler) {
 		commands_enter_user_mode_impl(
 			ctx,
 			stored.params,
@@ -6916,8 +6934,10 @@ commands_user_mode_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
 }
 
 // ---------------------------------------------------------------------------
-// Command_Func.call wrappers. Each adapts a core proc to the void
-// callback, reporting failures on the status line.
+// Command_Func.call wrappers. Each adapts a core proc to the fallible
+// callback, returning failures (message owned by allocator) to the
+// dispatcher instead of reporting them: only async callbacks outside
+// any execute (prompt, on-key) report, like C++ throw sites.
 // ---------------------------------------------------------------------------
 
 commands_nop_call :: proc(

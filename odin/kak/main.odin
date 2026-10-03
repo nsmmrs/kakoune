@@ -1883,8 +1883,22 @@ main_run_filter :: proc(
 		defer input_handler_destroy(&handler)
 		for key in keys {
 			input_handler_handle_key(&handler, key)
+			// C++ catches per buffer: report (unless quiet) and
+			// move on to the next buffer.
+			if msg, _, failed := input_handler_take_key_error(&handler, context.temp_allocator); failed {
+				defer delete(msg, context.temp_allocator)
+				if !quiet {
+					main_write_stderr(
+						fmt.tprintf(
+							"error while applying keys to buffer '{}': {}\n",
+							buffer_display_name(buf),
+							msg,
+						),
+					)
+				}
+				break
+			}
 		}
-		_ = quiet
 	}
 
 	bm := buffer_manager_instance()

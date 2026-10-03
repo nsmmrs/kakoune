@@ -3213,3 +3213,58 @@ test_commands_prompt_callback_text_removed :: proc(t: ^testing.T) {
 	testing.expect(t, !has_text_again)
 	commands_prompt_callback_destroy(stored, f.allocator)
 }
+
+// test_commands_dispatch_propagates_failures covers the fallible
+// Command_Func.call boundary: nested command failures reach the
+// caller (try/catch observes them) instead of being swallowed, Fail
+// propagates undecorated, and Kill_Session is never caught by try.
+@(test)
+test_commands_dispatch_propagates_failures :: proc(t: ^testing.T) {
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	// Pin a fixture-parented local scope so command_manager_execute
+	// never falls back to the shared global singleton.
+	exec_local := scope_local_make(&ctx, &buf.scope, f.allocator)
+	defer scope_local_destroy(exec_local, f.allocator)
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+
+	run := proc(t: ^testing.T, f: ^Test_Commands_Fixture, ctx: ^Context, sc: ^Shell_Context, line: string) -> (Commands_Error, string) {
+		err, msg := command_manager_execute(command_manager_instance(), line, ctx, sc, f.allocator)
+		return err, msg
+	}
+
+	// A failing command surfaces undecorated for Fail ...
+	err, msg := run(t, f, &ctx, &sc, "fail boom")
+	defer test_commands_free_msg(msg, f.allocator)
+	testing.expect_value(t, err, Commands_Error.Fail)
+	testing.expect_value(t, msg, "boom")
+
+	// ... and try/catch observes it and runs the handler.
+	err2, msg2 := run(t, f, &ctx, &sc, "try %{fail boom} catch %{nop}")
+	defer test_commands_free_msg(msg2, f.allocator)
+	testing.expect_value(t, err2, Commands_Error.None)
+
+	// A bare try swallows like the C++ (falls off the end).
+	err3, msg3 := run(t, f, &ctx, &sc, "try %{fail boom}")
+	defer test_commands_free_msg(msg3, f.allocator)
+	testing.expect_value(t, err3, Commands_Error.None)
+
+	// Errors from nested execute propagate with position and name.
+	err4, msg4 := run(t, f, &ctx, &sc, "try %{no-such-command-xyz} catch %{fail caught}")
+	defer test_commands_free_msg(msg4, f.allocator)
+	testing.expect_value(t, err4, Commands_Error.Fail)
+	testing.expect_value(t, msg4, "caught")
+
+	// Kill_Session unwinds past every catch (C++ parity).
+	err5, msg5 := run(t, f, &ctx, &sc, "try %{kill} catch %{nop}")
+	defer test_commands_free_msg(msg5, f.allocator)
+	testing.expect_value(t, err5, Commands_Error.Kill_Session)
+}

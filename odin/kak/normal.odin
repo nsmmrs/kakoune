@@ -940,7 +940,10 @@ normal_command_call :: proc(data: rawptr, text: string, event: Prompt_Event, ctx
 		shell_ctx := Shell_Context{env_vars = d.env_vars}
 		if err, msg := command_manager_execute(
 			command_manager_instance(), cmdline, ctx, &shell_ctx, context.temp_allocator,
-		); err != .None {
+		); err == .Kill_Session {
+			// C++ lets kill_session unwind quietly (no status).
+			delete(msg, context.temp_allocator)
+		} else if err != .None {
 			defer delete(msg, context.temp_allocator)
 			// C++ kill_session unwinds silently past the
 			// Client::handle_key boundary too.
@@ -3375,21 +3378,20 @@ normal_cmd_replay_macro :: proc(ctx: ^Context, params: Normal_Params) {
 	guard := utils_scoped_bool_make(context_keymaps_disabled(ctx))
 	defer utils_scoped_bool_release(&guard)
 	count := params.count
-	// A failing replayed key aborts the macro (C++ throw
-	// unwinding); only fresh failures abort, like handle_key.
 	handler := context_input_handler(ctx)
-	had_error := input_handler_has_key_error(handler)
-	aborted := false
-	for !aborted {
+	// Drop a stale flag from earlier interactive keys (failures are
+	// terminal within a key, so nothing live can be pending here).
+	input_handler_clear_key_error(handler)
+	replay_done := false
+	for !replay_done {
 		for key in keys {
 			input_handler_handle_key(handler, key)
-			if !had_error && input_handler_has_key_error(handler) {
-				aborted = true
+			// A C++ throw aborts the replay; the flag stays set so
+			// an enclosing exec aborts too.
+			if input_handler_has_key_error(handler) {
+				replay_done = true
 				break
 			}
-		}
-		if aborted {
-			break
 		}
 		count -= 1
 		if count <= 0 {
@@ -4156,10 +4158,14 @@ normal_user_mapping_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 	// Copy: reentrant unmap may free the mapping mid-replay.
 	keys := slice.clone(mapping.keys[:], context.temp_allocator)
 	defer delete(keys)
-	had_error := input_handler_has_key_error(handler)
+	// Drop a stale flag from earlier interactive keys (failures are
+	// terminal within a key, so nothing live can be pending here).
+	input_handler_clear_key_error(handler)
 	for k in keys {
 		input_handler_handle_key(handler, k)
-		if !had_error && input_handler_has_key_error(handler) {
+		// A C++ throw aborts the replay; the flag stays set so an
+		// enclosing exec aborts too.
+		if input_handler_has_key_error(handler) {
 			break
 		}
 	}

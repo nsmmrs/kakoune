@@ -52,13 +52,17 @@ Input_Handler_Error :: enum {
 // This ports the C++ main-loop catch, which reports throws escaping key
 // handling. Used at void-callback boundaries where errors cannot
 // propagate; the operation aborts exactly like a C++ unwind (defers run).
+// The failure is also recorded for key-driving loops (exec aborts).
 input_handler_report_error :: proc(ctx: ^Context, err: Input_Handler_Error) {
-	if ctx.client == nil {
-		return
-	}
 	msg := "buffer is read-only"
 	if err == .Repeat_Unavailable {
 		msg = "repeating last insert not available in this context"
+	}
+	if ctx.input_handler != nil {
+		input_handler_set_key_error(ctx.input_handler, msg)
+	}
+	if ctx.client == nil {
+		return
 	}
 	alloc := ctx.client.allocator
 	prompt := client_display_line_from_text("", Face{}, alloc)
@@ -2622,10 +2626,21 @@ input_handler_repeat_last_insert :: proc(h: ^Input_Handler) -> Input_Handler_Err
 	}
 	input_handler_push_mode(h, mode_obj)
 	n := len(h.last_insert.keys)
+	// Drop a stale flag from earlier interactive keys (failures are
+	// terminal within a key, so nothing live can be pending here).
+	input_handler_clear_key_error(h)
 	for i in 0 ..< n {
 		input_handler_handle_key(h, h.last_insert.keys[i])
+		// A C++ throw aborts the replay; the flag stays set so an
+		// enclosing exec aborts too.
+		if input_handler_has_key_error(h) {
+			break
+		}
 	}
-	assert(h.mode_stack[len(h.mode_stack) - 1].vtable == &input_handler_normal_vtable)
+	// A pending failure unwinds past this check in C++, so skip it.
+	if !input_handler_has_key_error(h) {
+		assert(h.mode_stack[len(h.mode_stack) - 1].vtable == &input_handler_normal_vtable)
+	}
 	return .None
 }
 

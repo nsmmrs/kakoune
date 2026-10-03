@@ -640,3 +640,30 @@ normal_test_command_prompt_env_keys_owned :: proc(t: ^testing.T) {
 	testing.expect(t, key_ptr(first, "register") != nil)
 	testing.expect(t, key_ptr(first, "register") != key_ptr(second, "register"))
 }
+
+// normal_test_fail_records_key_error covers the normal_fail half of
+// key-error propagation: every C++ throw at the NormalCmd boundary
+// lands on the handler flag so exec aborts instead of swallowing it.
+@(test)
+normal_test_fail_records_key_error :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+
+	h := Input_Handler{allocator = alloc}
+	ctx := Context{input_handler = &h}
+	// No client: nothing to print, but the flag must still be set.
+	normal_fail(&ctx, "no selections remaining")
+	testing.expect(t, input_handler_has_key_error(&h))
+	msg, _, failed := input_handler_take_key_error(&h, context.temp_allocator)
+	defer delete(msg, context.temp_allocator)
+	testing.expect(t, failed)
+	testing.expect_value(t, msg, "no selections remaining")
+
+	// A missing handler is tolerated (empty contexts).
+	empty := Context{}
+	normal_fail(&empty, "ignored")
+
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

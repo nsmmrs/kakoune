@@ -518,3 +518,36 @@ test_input_handler_key_error_slot :: proc(t: ^testing.T) {
 	testing.expect(t, !failed3)
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+// test_input_handler_key_error_flag covers the key_error channel that
+// carries C++ throws escaping the void on_key pipeline to key-driving
+// loops (exec aborts like a C++ unwind instead of swallowing).
+@(test)
+test_input_handler_key_error_flag :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+
+	h := Input_Handler{allocator = alloc}
+	testing.expect(t, !input_handler_has_key_error(&h))
+
+	// Set replaces any pending message; take moves it out and clears.
+	input_handler_set_key_error(&h, "no selections remaining")
+	testing.expect(t, input_handler_has_key_error(&h))
+	input_handler_set_key_error(&h, "nothing selected")
+	msg, _, failed := input_handler_take_key_error(&h, context.temp_allocator)
+	defer delete(msg, context.temp_allocator)
+	testing.expect(t, failed)
+	testing.expect_value(t, msg, "nothing selected")
+	testing.expect(t, !input_handler_has_key_error(&h))
+	_, _, failed2 := input_handler_take_key_error(&h, context.temp_allocator)
+	testing.expect(t, !failed2)
+
+	// Clear drops a pending failure.
+	input_handler_set_key_error(&h, "stale")
+	input_handler_clear_key_error(&h)
+	testing.expect(t, !input_handler_has_key_error(&h))
+
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

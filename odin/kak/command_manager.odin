@@ -48,6 +48,9 @@ Command_Manager_Error :: enum {
 	None,
 	// C++ `failure`: control flow, propagates through execute undecorated.
 	Fail,
+	// C++ kill_session: control flow, propagates undecorated and is
+	// never caught by try; the exit status rides commands_kill_status.
+	Kill_Session,
 	// C++ runtime_error/parse_error, detail carried in the owned msg.
 	Error,
 }
@@ -1030,6 +1033,10 @@ command_manager_execute_single_command :: proc(
 	defer parameters_parser_free(&pparser)
 
 	call_err, call_msg := cmd.func.call(cmd.func.data, &pparser, ctx, shell_ctx)
+	// Like the C++, failed commands skip the profile record below.
+	if call_err != .None {
+		return call_err, call_msg
+	}
 
 	if profile_on {
 		microseconds := int(clock_diff(profile_start, clock_now())) / 1000

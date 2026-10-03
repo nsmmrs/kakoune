@@ -204,7 +204,10 @@ client_manager_create_client :: proc(
 	hooks := context_hooks(ctx)
 	hook_manager_run_hook(hooks, .Client_Create, ctx.name, ctx)
 	sh_ctx := Shell_Context{}
-	if exec_err, exec_msg := command_manager_execute(command_manager_instance(), init_cmds, ctx, &sh_ctx, m.allocator); exec_err != .None {
+	if exec_err, exec_msg := command_manager_execute(command_manager_instance(), init_cmds, ctx, &sh_ctx, m.allocator); exec_err == .Kill_Session {
+		// C++ lets kill_session unwind quietly; clients are gone.
+		delete(exec_msg, m.allocator)
+	} else if exec_err != .None {
 		// C++ catch (runtime_error): report the failure, run RuntimeError.
 		// kill_session unwinds silently past this boundary.
 		defer delete(exec_msg, m.allocator)

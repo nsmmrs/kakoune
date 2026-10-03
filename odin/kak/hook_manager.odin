@@ -365,7 +365,10 @@ hook_manager_run_hook :: proc(m: ^Hook_Manager, hook: Hook, param: string, ctx: 
 			continue
 		}
 		err, msg := hook_manager_exec(tr.hook, hook, param, ctx, &tr.captures)
-		if err != .None {
+		if err == .Kill_Session {
+			// Not an error: the session is going away (C++ unwinds).
+			delete(msg, context.allocator)
+		} else if err != .None {
 			hook_error = true
 			hook_manager_debug_write(
 				{"error running hook ", hook_name, "(", param, ")/", tr.hook.group, ": ", msg},

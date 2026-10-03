@@ -146,7 +146,8 @@ option_manager_flags_to_string :: proc(flags: $F, descs: []Enum_Desc($G), alloca
 
 // option_manager_flags_from_string parses '|' separated flag names (C++
 // option_from_string(Flags) throws "invalid flag value" on miss,
-// including on empty segments, so "" itself is invalid).
+// including on empty segments; "" itself splits to zero parts in C++,
+// so it parses to the empty set).
 option_manager_flags_from_string :: proc($F: typeid, $G: typeid, s: string, descs: []Enum_Desc(G), allocator := context.allocator) -> (F, bool) {
 	_ = allocator
 	// ranges_split matches the C++ split: "" yields zero parts (the

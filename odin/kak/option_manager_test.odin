@@ -1021,6 +1021,9 @@ option_manager_test_flags_options :: proc(t: ^testing.T) {
 	v, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {""})
 	testing.expect_value(t, err, Option_Manager_Error.None)
 	testing.expect_value(t, v.(Auto_Complete), Auto_Complete{})
+	// A trailing separator leaves an empty part, which is an error.
+	_, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert|"})
+	testing.expect_value(t, err, Option_Manager_Error.Convert)
 	_, err, fmsg = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert", "prompt"})
 	testing.expect_value(t, err, Option_Manager_Error.Convert)
 	testing.expect_value(t, fmsg, "expected a single value for option")
