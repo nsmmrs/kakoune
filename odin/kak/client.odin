@@ -126,10 +126,11 @@ KNOTFIX_ui_lines :: proc(lines: []Display_Line, allocator := context.allocator) 
 	return wrapped
 }
 
-// KNOTFIX_ui_buffer reinterprets a display buffer for the merged
+// KNOTFIX_ui_buffer wraps a display buffer for the merged
 // user_interface_draw, whose placeholder buffer type is still opaque.
-KNOTFIX_ui_buffer :: proc(db: ^Display_Buffer) -> ^User_Interface_Display_Buffer {
-	return cast(^User_Interface_Display_Buffer)db
+// The wrapper borrows db; it must not outlive the call.
+KNOTFIX_ui_buffer :: proc(db: ^Display_Buffer) -> User_Interface_Display_Buffer {
+	return User_Interface_Display_Buffer{opaque = db}
 }
 
 // ---------------------------------------------------------------------------
@@ -702,9 +703,10 @@ client_redraw_ifn :: proc(c: ^Client) {
 		if pos, ok := window_display_coord(window, main_cursor); ok {
 			cursor_pos = pos
 		}
+		wrapped := KNOTFIX_ui_buffer(db)
 		user_interface_draw(
 			c.ui,
-			KNOTFIX_ui_buffer(db),
+			&wrapped,
 			cursor_pos,
 			client_face(faces, "Default"),
 			client_face(faces, "BufferPadding"),

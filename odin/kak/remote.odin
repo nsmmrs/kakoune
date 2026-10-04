@@ -1118,10 +1118,10 @@ remote_ui_unwrap_line :: proc(l: User_Interface_Display_Line) -> ^Display_Line {
 	return (^Display_Line)(l.opaque)
 }
 
-// remote_ui_unwrap_buffer reinterprets an opaque UI buffer as the
-// real Display_Buffer it wraps (see KNOTFIX_ui_buffer).
+// remote_ui_unwrap_buffer returns the real Display_Buffer an opaque
+// UI buffer wraps (see KNOTFIX_ui_buffer).
 remote_ui_unwrap_buffer :: proc(db: ^User_Interface_Display_Buffer) -> ^Display_Buffer {
-	return cast(^Display_Buffer)db
+	return (^Display_Buffer)(db.opaque)
 }
 
 // remote_ui_is_ok reports whether the UI socket is still open.
@@ -1559,8 +1559,8 @@ remote_client_handle_message :: proc(state: ^Remote_Client_Socket, watcher: ^Eve
 		if widget_err != .None {
 			return widget_err
 		}
-		db_wrapped := cast(^User_Interface_Display_Buffer)&db
-		user_interface_draw(c.ui, db_wrapped, cursor, default_face, padding_face, Coord_Column(widget))
+		db_wrapped := KNOTFIX_ui_buffer(&db)
+		user_interface_draw(c.ui, &db_wrapped, cursor, default_face, padding_face, Coord_Column(widget))
 	case .Draw_Status:
 		prompt, err := remote_msg_reader_read_display_line(r, c.allocator)
 		if err != .None {

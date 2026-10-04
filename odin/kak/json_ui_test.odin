@@ -280,8 +280,8 @@ json_ui_test_unwrap :: proc(t: ^testing.T) {
 	wrapped := User_Interface_Display_Line{opaque = &line}
 	testing.expect(t, json_ui_unwrap_line(wrapped) == &line)
 	db := Display_Buffer{}
-	wrapped_db := cast(^User_Interface_Display_Buffer)&db
-	testing.expect(t, json_ui_unwrap_buffer(wrapped_db) == &db)
+	wrapped_db := KNOTFIX_ui_buffer(&db)
+	testing.expect(t, json_ui_unwrap_buffer(&wrapped_db) == &db)
 }
 
 // json_ui_test_eval feeds text through json_parse and json_ui_eval

@@ -385,10 +385,10 @@ json_ui_unwrap_line :: proc(l: User_Interface_Display_Line) -> ^Display_Line {
 	return (^Display_Line)(l.opaque)
 }
 
-// json_ui_unwrap_buffer reinterprets an opaque UI buffer as the real
-// Display_Buffer it wraps (see KNOTFIX_ui_buffer).
+// json_ui_unwrap_buffer returns the real Display_Buffer an opaque
+// UI buffer wraps (see KNOTFIX_ui_buffer).
 json_ui_unwrap_buffer :: proc(db: ^User_Interface_Display_Buffer) -> ^Display_Buffer {
-	return cast(^Display_Buffer)db
+	return (^Display_Buffer)(db.opaque)
 }
 
 // json_ui_is_ok reports whether stdin is still open (port of
