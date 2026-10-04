@@ -281,6 +281,8 @@ test_option_manager_unset :: proc(t: ^testing.T) {
 
 @(test)
 test_option_manager_unset_trash :: proc(t: ^testing.T) {
+	sync.lock(&scope_test_global_mutex)
+	defer sync.unlock(&scope_test_global_mutex)
 	g := scope_global_init()
 	defer scope_global_deinit()
 	reg := scope_global_option_registry(g)

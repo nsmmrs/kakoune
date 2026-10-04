@@ -655,6 +655,51 @@ test_commands_try_no_catch_swallows :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Commands_Error.None)
 }
 
+// A failure nested in try stays off the status line: C++ catches the
+// throw before any boundary prints it (regression: the caught error
+// leaked into draw_status, breaking 3398-readonly-fifo-failure).
+@(test)
+test_commands_try_suppresses_nested_status :: proc(t: ^testing.T) {
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	// Pin a fixture-parented local scope so command_manager_execute
+	// never falls back to the shared global singleton.
+	exec_local := scope_local_make(&ctx, &buf.scope, f.allocator)
+	defer scope_local_destroy(exec_local, f.allocator)
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+	c := client_test_make_client(f.allocator)
+	defer client_test_destroy_client_arrays(&c)
+	ctx.client = &c
+
+	p, spec, _ := test_commands_parse(f, "try", {"edit -existing /definitely/missing/file_xyz"})
+	defer test_commands_free_parse(f, &p, &spec)
+	err, msg := commands_try(&p, &ctx, &sc, f.allocator)
+	if err != .None {
+		test_commands_free_msg(msg, f.allocator)
+	}
+	testing.expect_value(t, err, Commands_Error.None)
+	testing.expect_value(t, len(c.status_content.atoms), 0)
+
+	// Positive control: the same failure outside try propagates
+	// (reporting/printing happens at the execution boundaries, so
+	// the status line stays untouched here too).
+	p2, spec2, _ := test_commands_parse(f, "edit", {"-existing", "/definitely/missing/file_xyz"})
+	defer test_commands_free_parse(f, &p2, &spec2)
+	err2, msg2 := commands_edit(&p2, &ctx, &f.env, false, f.allocator)
+	defer test_commands_free_msg(msg2, f.allocator)
+	testing.expect(t, err2 != .None)
+	commands_report(err2, msg2, &ctx)
+	testing.expect_value(t, len(c.status_content.atoms), 0)
+}
+
 @(test)
 test_commands_edit_scratch :: proc(t: ^testing.T) {
 	// NOTE: scratch creation via buffer_manager_create is untestable
@@ -686,6 +731,21 @@ test_commands_edit_scratch :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, err2, Commands_Error.None)
 	testing.expect_value(t, context_buffer(&ctx).display_name, "*test*")
+}
+
+@(test)
+test_commands_edit_scratch_initial_line :: proc(t: ^testing.T) {
+	// Regression: a fresh scratch buffer must hold a single "\n" line
+	// (C++ create_buffer_from_string with empty data); an empty line
+	// tripped the line invariant on first insert. The full edit path
+	// is untestable in the fixture (Buf_Create hooks trap), so this
+	// covers the extracted initial-lines builder used by commands_edit.
+	lines := commands_scratch_initial_lines()
+	defer delete(lines)
+	testing.expect_value(t, len(lines), 1)
+	if len(lines) > 0 {
+		testing.expect_value(t, lines[0], "\n")
+	}
 }
 
 @(test)
@@ -1203,6 +1263,151 @@ test_commands_add_highlighter_errors :: proc(t: ^testing.T) {
 	err2, msg2 := commands_add_highlighter(&p2, &ctx, &f.env, f.allocator)
 	defer test_commands_free_msg(msg2, f.allocator)
 	testing.expect_value(t, err2, Commands_Error.Error)
+}
+
+// test_commands_delegate_stub_factory mimics the C++ default-region
+// factory: an unknown delegate name fails (nil), a known one yields
+// an empty group.
+test_commands_delegate_stub_factory :: proc(
+	params: Highlighter_Params,
+	parent: ^Highlighter,
+	allocator: mem.Allocator,
+) -> ^Highlighter {
+	_ = parent
+	if len(params) == 0 || params[0] != "wrap" {
+		return nil
+	}
+	g := new(Highlighter_Group, allocator)
+	g.base = Highlighter{
+		vtable = &highlighters_group_vtable,
+		passes = highlighters_pass_all,
+		data   = g,
+	}
+	g.highlighters = make(map[string]^Highlighter, allocator)
+	g.order = make([dynamic]string, allocator)
+	g.allocator = allocator
+	return &g.base
+}
+
+// add-highlighter surfaces a factory failure like the C++ throw
+// does (regression: 4959's try/catch never ran its fallback
+// because the failure was swallowed).
+@(test)
+test_commands_add_highlighter_rejects_bad_delegate :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	highlighters_test_shared_setup(f.allocator)
+	defer highlighters_test_shared_teardown()
+	f.highlighters["default-region"] = Highlighter_Factory_And_Description {
+		factory = test_commands_delegate_stub_factory,
+	}
+
+	p, spec, _ := test_commands_parse(
+		f,
+		"add-highlighter",
+		{"shared/dr", "default-region", "invalid", "highlighter"},
+	)
+	defer test_commands_free_parse(f, &p, &spec)
+	err, msg := commands_add_highlighter(&p, &ctx, &f.env, f.allocator)
+	defer test_commands_free_msg(msg, f.allocator)
+	testing.expect_value(t, err, Commands_Error.Error)
+	testing.expect_value(t, msg, "cannot add highlighter 'shared/dr'")
+
+	// A known delegate succeeds.
+	p2, spec2, _ := test_commands_parse(
+		f,
+		"add-highlighter",
+		{"shared/dr", "default-region", "wrap"},
+	)
+	defer test_commands_free_parse(f, &p2, &spec2)
+	err2, msg2 := commands_add_highlighter(&p2, &ctx, &f.env, f.allocator)
+	testing.expect_value(t, err2, Commands_Error.None)
+	testing.expect_value(t, msg2, "")
+}
+
+commands_itersel_noop :: proc(
+	p: ^Parameters_Parser,
+	ctx: ^Context,
+	shell_ctx: ^Shell_Context,
+	env: ^Commands_Env,
+	allocator: mem.Allocator,
+) -> (
+	Commands_Error,
+	string,
+) {
+	return .None, ""
+}
+
+@(test)
+test_commands_itersel_clones_captures :: proc(t: ^testing.T) {
+	// itersel must deep-copy each iteration's selections into the
+	// merged list: the next iteration destroys the current list, so
+	// a shallow append dangles the captures (C++ Selection copy
+	// deep-copies) and teardown double-frees them.
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello", "world"})
+	ctx := test_commands_make_context(f, buf)
+	// Explicit destroy (not deferred) so the bad-free check below
+	// observes teardown; fixture teardown still runs after, as with
+	// LIFO defers. Each test runs under its own tracking allocator.
+	testing.expect_value(t, f.allocator.procedure, mem.tracking_allocator_proc)
+	track := cast(^mem.Tracking_Allocator)f.allocator.data
+	baseline := len(track.bad_free_array)
+
+	target := context_selections_write_only(&ctx)
+	selection_list_destroy(target)
+	sels := make([dynamic]Selection, 2, f.allocator)
+	sels[0] = Selection{
+		basic = Basic_Selection{
+			anchor = Coord_Buffer{line = 0, column = 0},
+			cursor = Coord_Buffer_And_Target{
+				coord = Coord_Buffer{line = 0, column = 5},
+			},
+		},
+	}
+	sels[0].captures = make([dynamic]string, 1, f.allocator)
+	sels[0].captures[0] = strings.clone("hello", f.allocator)
+	sels[1] = Selection{
+		basic = Basic_Selection{
+			anchor = Coord_Buffer{line = 1, column = 0},
+			cursor = Coord_Buffer_And_Target{
+				coord = Coord_Buffer{line = 1, column = 5},
+			},
+		},
+	}
+	sels[1].captures = make([dynamic]string, 1, f.allocator)
+	sels[1].captures[0] = strings.clone("world", f.allocator)
+	target^ = Selection_List{
+		main       = 0,
+		selections = sels,
+		buffer     = buf,
+		timestamp  = buffer_timestamp(buf),
+		allocator  = f.allocator,
+	}
+
+	shell_ctx := Shell_Context{}
+	err, msg := commands_context_wrap_itersel(
+		nil,
+		&ctx,
+		&ctx,
+		false,
+		&shell_ctx,
+		&f.env,
+		commands_itersel_noop,
+		f.allocator,
+	)
+	testing.expect_value(t, err, Commands_Error.None)
+	testing.expect_value(t, msg, "")
+	merged := context_selections_write_only(&ctx)
+	testing.expect_value(t, len(merged.selections), 2)
+	testing.expect_value(t, merged.selections[0].captures[0], "hello")
+	testing.expect_value(t, merged.selections[1].captures[0], "world")
+	context_destroy(&ctx)
+	testing.expect_value(t, len(track.bad_free_array), baseline)
 }
 
 @(test)
@@ -1762,6 +1967,38 @@ test_commands_parse_keymap_mode :: proc(t: ^testing.T) {
 	_, err2, msg2 := commands_parse_keymap_mode("bogus", {}, context.allocator)
 	defer test_commands_free_msg(msg2, context.allocator)
 	testing.expect_value(t, err2, Commands_Error.Error)
+}
+
+@(test)
+test_commands_map_docstring_lifetime :: proc(t: ^testing.T) {
+	// Regression: the -docstring value must stay alive past the
+	// switch-parsing branch (a branch-scoped defer freed it before
+	// the mapping stored its copy). Same class as the edit scratch
+	// name and user-mode title fixes.
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	p, spec, _ := test_commands_parse(
+		f,
+		"map",
+		{"buffer", "normal", "x", "l", "-docstring", "go right"},
+	)
+	defer test_commands_free_parse(f, &p, &spec)
+	err, msg := commands_map(&p, &ctx, &f.env, f.allocator)
+	if err != .None {
+		test_commands_free_msg(msg, f.allocator)
+	}
+	testing.expect_value(t, err, Commands_Error.None)
+	key, _ := keys_parse("x", f.allocator)
+	defer delete(key)
+	mapping := keymap_manager_get_mapping(&buf.scope.data.keymaps, key[0], .Normal)
+	testing.expect(t, mapping != nil)
+	if mapping != nil {
+		testing.expect_value(t, mapping.docstring, "go right")
+	}
 }
 
 @(test)

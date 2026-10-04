@@ -635,11 +635,10 @@ client_ui_on_paste_shim :: proc(data: rawptr, content: string) {
 
 // client_process_pending_inputs dispatches the queued keys, stealing
 // the queue first since handling may queue more. It returns whether
-// any key was handled.
-//
-// GAP: the C++ reports per-key runtime_errors on the status line and
-// through the RuntimeError hook; without error returns on the input
-// handler that path is unported (see the module note).
+// any key was handled. Key errors stashed on the handler are
+// reported per key like the C++ catch (debug buffer + RuntimeError
+// hook; the status line was already set by the reporter), and skip
+// the RawKey hook like the C++ unwound path.
 client_process_pending_inputs :: proc(c: ^Client) -> bool {
 	ctx := client_context(c)
 	debug_opt := option_manager_get_checked(context_options(ctx), "debug")
@@ -668,6 +667,12 @@ client_process_pending_inputs :: proc(c: ^Client) -> bool {
 		} else {
 			ctx.ensure_cursor_visible = true
 			input_handler_handle_key(&c.input_handler, key, false)
+		}
+		if errmsg, _, failed := input_handler_take_key_error(&c.input_handler, context.temp_allocator); failed {
+			dbg, _ := format_format("Error: {}", {errmsg}, context.temp_allocator)
+			debug_write_to_buffer(dbg)
+			hook_manager_run_hook(context_hooks(ctx), .Runtime_Error, errmsg, ctx)
+			continue
 		}
 		raw_name := keys_to_string_key(key, context.temp_allocator)
 		hook_manager_run_hook(context_hooks(ctx), .Raw_Key, raw_name, ctx)

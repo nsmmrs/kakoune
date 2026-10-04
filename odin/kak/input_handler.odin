@@ -2488,6 +2488,7 @@ input_handler_deinit :: proc(h: ^Input_Handler) {
 	delete(h.mode_stack)
 	delete(h.last_insert.keys)
 	delete(h.recorded_keys)
+	input_handler_clear_key_error(h)
 	context_destroy(&h.ctx)
 }
 
@@ -2630,6 +2631,10 @@ input_handler_repeat_last_insert :: proc(h: ^Input_Handler) -> Input_Handler_Err
 	// terminal within a key, so nothing live can be pending here).
 	input_handler_clear_key_error(h)
 	for i in 0 ..< n {
+		// C++ aborts the repeat on the first throw.
+		if input_handler_has_key_error(h) {
+			break
+		}
 		input_handler_handle_key(h, h.last_insert.keys[i])
 		// A C++ throw aborts the replay; the flag stays set so an
 		// enclosing exec aborts too.

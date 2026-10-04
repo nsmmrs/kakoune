@@ -5,6 +5,7 @@ package kak
 
 import "core:slice"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 
 // remainders_test_bracket wraps s in angle brackets (an owning
@@ -128,6 +129,8 @@ test_remainders_scoped_selection_edition :: proc(t: ^testing.T) {
 
 @(test)
 test_remainders_local_scope :: proc(t: ^testing.T) {
+	sync.lock(&scope_test_global_mutex)
+	defer sync.unlock(&scope_test_global_mutex)
 	g := scope_global_init()
 	defer scope_global_deinit()
 	ctx := context_make_empty()
@@ -293,6 +296,8 @@ test_remainders_context_make_empty :: proc(t: ^testing.T) {
 
 @(test)
 test_remainders_global_scope_option_registry :: proc(t: ^testing.T) {
+	sync.lock(&scope_test_global_mutex)
+	defer sync.unlock(&scope_test_global_mutex)
 	g := scope_global_init()
 	defer scope_global_deinit()
 	testing.expect(t, global_scope_option_registry() == &g.global_data.option_registry)

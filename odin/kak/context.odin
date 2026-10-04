@@ -921,6 +921,13 @@ context_print_status_full :: proc(
 ) {
 	if context_has_client(ctx) {
 		client_print_status(ctx.client, prompt, content, cursor_pos, style)
+	} else {
+		// Headless: no client takes ownership, so destroy the
+		// lines here (C++ DisplayLines are RAII).
+		prompt_copy := prompt
+		content_copy := content
+		client_display_line_destroy(&prompt_copy, ctx.allocator)
+		client_display_line_destroy(&content_copy, ctx.allocator)
 	}
 }
 

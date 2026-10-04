@@ -923,6 +923,7 @@ main_env_char_length :: proc(buf: ^Buffer, sel: Selection) -> int {
 		buffer_char_next(buf, selection_basic_max(sel.basic)),
 		context.temp_allocator,
 	)
+	defer delete(s, context.temp_allocator)
 	return utf8.rune_count(s)
 }
 
@@ -1896,6 +1897,9 @@ main_run_filter :: proc(
 		input_handler_init(&handler, list, {.Draft}, "", allocator)
 		defer input_handler_destroy(&handler)
 		for key in keys {
+			if input_handler_has_key_error(&handler) {
+				break
+			}
 			input_handler_handle_key(&handler, key)
 			// C++ catches per buffer: report (unless quiet) and
 			// move on to the next buffer.

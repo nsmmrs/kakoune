@@ -686,3 +686,88 @@ normal_test_command_count_env_owned :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(track.bad_free_array), 0)
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+@(test)
+normal_test_keep_matching_searches_selection_subject :: proc(t: ^testing.T) {
+	// Regression (921-keep-empty-line-matches-all-lines): keep
+	// matching searches each selection as its own subject (C++
+	// regex_search(begin, end, begin, end)): `^$` keeps only the
+	// empty line, not the line before it (whose end boundary sits
+	// where the next line starts).
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"aaa\n", "bbb\n", "\n"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	mk_sel := proc(anchor, cursor: Coord_Buffer) -> Selection {
+		return Selection{basic = Basic_Selection{anchor = anchor, cursor = coord_buffer_and_target(cursor)}}
+	}
+	sels := []Selection{mk_sel({0, 0}, {0, 3}), mk_sel({1, 0}, {1, 3}), mk_sel({2, 0}, {2, 0})}
+	selection_list_set(context_selections_write_only(&ctx), sels, 2)
+
+	re, rmsg, rerr := regex_make("^$", {}, f.allocator)
+	testing.expect_value(t, rerr, Regex_Error.None)
+	_ = rmsg
+	defer regex_destroy(&re)
+	nerr, _ := normal_keep_apply(&ctx, &re, true)
+	testing.expect_value(t, nerr, Normal_Error.None)
+	got := context_selections(&ctx).selections
+	testing.expect_value(t, len(got), 1)
+	if len(got) == 1 {
+		testing.expect_value(t, input_handler_sel_min(&got[0]), Coord_Buffer{2, 0})
+	}
+}
+
+@(test)
+normal_test_user_mapping_replay :: proc(t: ^testing.T) {
+	// Regression: the mapping-keys scratch copy lives on the temp
+	// allocator and must be freed with it (a bare delete ran the
+	// heap allocator on temp memory and crashed). A digit mapping
+	// replays side-effect-free through a minimal handler.
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	kx, _ := keys_parse("x", f.allocator)
+	defer delete(kx)
+	k5, _ := keys_parse("5", f.allocator)
+	defer delete(k5)
+	keymap_manager_map_key(&buf.scope.data.keymaps, kx[0], .User, k5[:], "", false)
+	defer keymap_manager_unmap_key(&buf.scope.data.keymaps, kx[0], .User)
+	testing.expect(t, keymap_manager_get_mapping(&buf.scope.data.keymaps, kx[0], .User) != nil)
+
+	h := Input_Handler{allocator = f.allocator}
+	ctx.input_handler = &h
+	sels := selection_list_make_single(buf, Selection{}, buffer_timestamp(buf), f.allocator)
+	context_init(&h.ctx, nil, sels, {.Draft}, "test", f.allocator)
+	selection_list_destroy(&sels)
+	defer context_destroy(&h.ctx)
+	fake_data := input_handler_Normal{}
+	fake := Input_Mode{vtable = &input_handler_normal_vtable, input_handler = &h, data = &fake_data}
+	fake_data.handler = &h
+	fake_data.self = &fake
+	h.mode_stack = make([dynamic]^Input_Mode, 0, 1, f.allocator)
+	defer delete(h.mode_stack)
+	append(&h.mode_stack, &fake)
+
+	d := normal_User_Mapping_Data{params = Normal_Params{}}
+	// Shadow the ambient allocator: the temp-allocated scratch copy
+	// must never be freed through it. Reserve the hook recursion
+	// guards first: their appends use the ambient allocator while
+	// hook teardown frees with the manager allocator.
+	reserve(&buf.scope.data.hooks.running_hooks, 2)
+	reserve(&f.global.scope.data.hooks.running_hooks, 2)
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	old_alloc := context.allocator
+	context.allocator = mem.tracking_allocator(&track)
+	normal_user_mapping_call(&d, kx[0], &ctx)
+	context.allocator = old_alloc
+	testing.expect_value(t, len(track.bad_free_array), 0)
+	// The replayed digit landed in the forced-normal params.
+	testing.expect_value(t, fake_data.params.count, 5)
+}

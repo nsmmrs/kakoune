@@ -1,7 +1,15 @@
 package kak
 
 import "core:mem"
+import "core:sync"
 import "core:testing"
+
+// scope_test_global_mutex serializes the global-scope singleton
+// users in this file, remainders_test and option_manager_test: the
+// singleton is refcounted but each test tracks its own allocator,
+// so overlapping init/deinit pairs free one test's memory under
+// another test's tracker.
+scope_test_global_mutex: sync.Mutex
 
 @(test)
 test_scope_make_root :: proc(t: ^testing.T) {
@@ -77,6 +85,8 @@ test_scope_global :: proc(t: ^testing.T) {
 
 @(test)
 test_scope_global_singleton :: proc(t: ^testing.T) {
+	sync.lock(&scope_test_global_mutex)
+	defer sync.unlock(&scope_test_global_mutex)
 	g := scope_global_init()
 	testing.expect(t, g != nil)
 	testing.expect(t, scope_global_instance() == g)

@@ -283,6 +283,40 @@ register_manager_test_dynamic :: proc(t: ^testing.T) {
 	testing.expect_value(t, register_manager_test_setter_seen[2], "s3")
 }
 
+// Separate counter/getter for the get_main test: tests run threaded
+// and must not share mutable package state.
+register_manager_test_main_getter_calls := 0
+
+register_manager_test_main_getter :: proc(
+	ctx: ^Context,
+	allocator: mem.Allocator,
+) -> [dynamic]string {
+	register_manager_test_main_getter_calls += 1
+	res := make([dynamic]string, allocator)
+	append(&res, "m1", "m2")
+	return res
+}
+
+@(test)
+register_manager_test_dynamic_get_main_refreshes :: proc(t: ^testing.T) {
+	register_manager_test_main_getter_calls = 0
+	reg := register_manager_make_dynamic(
+		"d",
+		register_manager_test_main_getter,
+		register_manager_test_setter,
+	)
+	defer register_manager_destroy_register(reg)
+	register_manager_test_disable_hooks(reg)
+
+	// get_main on a cold register must run the live getter (C++
+	// StaticRegister::get_main calls the virtual get first); it must
+	// not read back the empty cache.
+	testing.expect_value(t, register_manager_get_main(reg, nil, 0), "m1")
+	testing.expect_value(t, register_manager_test_main_getter_calls, 1)
+	testing.expect_value(t, register_manager_get_main(reg, nil, 5), "m2")
+	testing.expect_value(t, register_manager_test_main_getter_calls, 2)
+}
+
 @(test)
 register_manager_test_dynamic_readonly_get :: proc(t: ^testing.T) {
 	register_manager_test_readonly_getter_calls = 0

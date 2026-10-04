@@ -1714,7 +1714,11 @@ highlighters_tabulation_apply :: proc(hctx: Highlight_Context, display_buffer: ^
 				}
 				next_tab := pos + rel
 				for pos != next_tab {
-					column += Coord_Column(unicode_codepoint_width(utf8_read_codepoint(line_str, &pos)))
+					// Bound the decode at the tab like C++
+					// read_codepoint(pos, next_tab): a truncated
+					// lead yields the byte without consuming past
+					// it, so pos always lands exactly on next_tab.
+					column += Coord_Column(unicode_codepoint_width(utf8_read_codepoint(line_str[:next_tab], &pos)))
 				}
 				tabwidth := Coord_Column(tabstop) - (column % Coord_Column(tabstop))
 				column += tabwidth

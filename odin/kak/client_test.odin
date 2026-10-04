@@ -164,6 +164,20 @@ client_test_destroy_client_arrays :: proc(c: ^Client) {
 	delete(c.pending_keys)
 }
 
+// The UI key adapter routes the key into the owning client's queue
+// (data is the Client installed by client_make; without the wiring,
+// UI-sent keys never arrive).
+@(test)
+client_test_ui_on_key_queues :: proc(t: ^testing.T) {
+	c := client_test_make_client()
+	defer client_test_destroy_client_arrays(&c)
+
+	key := Keys_Key{keys_MOD_NONE, 'x'}
+	client_ui_on_key_shim(cast(rawptr)&c, key)
+	testing.expect_value(t, len(c.pending_keys), 1)
+	testing.expect_value(t, c.pending_keys[0], key)
+}
+
 // Menu show stores the choices unselected and flags Menu_Show.
 @(test)
 client_test_menu_show :: proc(t: ^testing.T) {

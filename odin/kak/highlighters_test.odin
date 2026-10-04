@@ -838,6 +838,46 @@ highlighters_test_tabulation :: proc(t: ^testing.T) {
 
 }
 
+// A truncated multibyte lead before a tab must not hang the
+// tabulation pass: like C++ read_codepoint(pos, end), the decode is
+// bounded so pos always lands exactly on the tab (1195 hung here,
+// then overshot range ends in trim).
+@(test)
+highlighters_test_tabulation_truncated_lead_before_tab :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	alloc := mem.tracking_allocator(&track)
+	defer highlighters_test_track_check(t, &track)
+	// Private temp arena: the runner shares one temp arena across
+	// parallel tests and wipes it per test, so impl scratch must not
+	// use the global temp allocator here.
+	temp_arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&temp_arena, alloc, alloc)
+	context.temp_allocator = mem.dynamic_arena_allocator(&temp_arena)
+	defer mem.dynamic_arena_destroy(&temp_arena)
+
+	s: Highlighters_Test_Setup
+	highlighters_test_setup_make(&s, {"\xd4\t\n"}, alloc)
+	defer highlighters_test_setup_destroy(&s)
+	highlighters_test_declare_option(&s, "tabstop", 8)
+	rng := highlighters_test_range(&s)
+
+	tab := highlighters_tabulation_make(alloc)
+	defer highlighter_destroy(tab, alloc)
+	db := highlighters_test_display_buffer(&s, alloc)
+	defer display_buffer_destroy(&db)
+	highlighter_highlight(tab, highlighters_test_hctx(&s, {.Replace}), &db, rng)
+	testing.expect_value(t, len(db.lines[0].atoms), 3)
+	testing.expect_value(t, display_buffer_atom_content(db.lines[0].atoms[0]), "\xd4")
+	testing.expect_value(t, display_buffer_atom_content(db.lines[0].atoms[1]), "       ")
+	testing.expect_value(t, display_buffer_line_length(db.lines[0]), Coord_Column(9))
+
+	// The same bound keeps trim from overshooting the split range.
+	kept := display_buffer_atom_trim_end(&db.lines[0].atoms[0], 80)
+	testing.expect_value(t, kept, Coord_Column(1))
+}
+
 @(test)
 highlighters_test_show_whitespaces :: proc(t: ^testing.T) {
 	track: mem.Tracking_Allocator

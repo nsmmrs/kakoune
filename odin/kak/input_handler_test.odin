@@ -571,3 +571,32 @@ test_input_handler_key_error_kind_roundtrip :: proc(t: ^testing.T) {
 	testing.expect(t, !input_handler_has_key_error(&h))
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+@(test)
+test_input_handler_repeat_aborted_skips_normal_assert :: proc(t: ^testing.T) {
+	// Regression (5531-crash-on-repeat-nested-in-insert): a replay
+	// aborted by a nested failure must not trip the end-of-replay
+	// normal-mode assert: C++ unwinds past it, leaving the pushed
+	// insert mode behind for the caller, and the stashed error
+	// fails the enclosing command.
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello\n"})
+	buf.flags |= {.Read_Only}
+	sel := Selection{basic = Basic_Selection{anchor = {0, 1}, cursor = coord_buffer_and_target({0, 1})}}
+	sels := selection_list_make_single(buf, sel, buffer_timestamp(buf), f.allocator)
+	h := input_handler_make(sels, {}, "test", f.allocator)
+	defer input_handler_destroy(h)
+	selection_list_destroy(&sels)
+	if cerr := context_change_buffer(&h.ctx, buf); cerr != .None {
+		panic("test_input_handler_repeat_aborted: context_change_buffer failed")
+	}
+
+	// Backspace on a read-only buffer fails mid-replay like a
+	// nested C++ throw, stashing the key error.
+	append(&h.last_insert.keys, Keys_Key{key = keys_BACKSPACE})
+	err := input_handler_repeat_last_insert(h)
+	testing.expect_value(t, err, Input_Handler_Error.None)
+	testing.expect(t, input_handler_has_key_error(h))
+	testing.expect_value(t, len(h.mode_stack), 2)
+}

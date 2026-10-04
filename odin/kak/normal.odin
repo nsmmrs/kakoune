@@ -3394,7 +3394,7 @@ normal_cmd_replay_macro :: proc(ctx: ^Context, params: Normal_Params) {
 			}
 		}
 		count -= 1
-		if count <= 0 {
+		if count <= 0 || input_handler_has_key_error(handler) {
 			break
 		}
 	}
@@ -4157,11 +4157,15 @@ normal_user_mapping_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 	defer context_scoped_selection_edition_destroy(&sel_edition)
 	// Copy: reentrant unmap may free the mapping mid-replay.
 	keys := slice.clone(mapping.keys[:], context.temp_allocator)
-	defer delete(keys)
+	defer delete(keys, context.temp_allocator)
 	// Drop a stale flag from earlier interactive keys (failures are
 	// terminal within a key, so nothing live can be pending here).
 	input_handler_clear_key_error(handler)
 	for k in keys {
+		// C++ aborts the replay on the first throw.
+		if input_handler_has_key_error(handler) {
+			break
+		}
 		input_handler_handle_key(handler, k)
 		// A C++ throw aborts the replay; the flag stays set so an
 		// enclosing exec aborts too.

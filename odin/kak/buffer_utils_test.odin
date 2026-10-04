@@ -20,6 +20,11 @@ import posix "core:sys/posix"
 // sections in this file and debug_test.odin.
 buffer_utils_test_singleton_mutex: sync.Mutex
 
+// buffer_utils_test_fifo_mutex serializes the fifo-registry tests:
+// buffer_utils_fifo_owners is process-global and the fifo tests
+// delete it on exit, so concurrent runs corrupt each other.
+buffer_utils_test_fifo_mutex: sync.Mutex
+
 // buffer_utils_test_claim_singletons takes the singleton mutex and
 // waits (bounded) for a foreign buffer-manager user to finish.
 // Returns false when the manager stays busy, in which case the

@@ -261,6 +261,9 @@ register_manager_dynamic_get :: proc(data: rawptr, ctx: ^Context, allocator: mem
 // before indexing (C++ DynamicRegister inherits
 // StaticRegister::get_main, which calls the virtual get()).
 register_manager_dynamic_get_main :: proc(data: rawptr, ctx: ^Context, main_index: int) -> string {
+	// C++ StaticRegister::get_main calls the virtual get first, which
+	// refreshes the dynamic cache from the live getter; without the
+	// refresh a cold register reads back empty.
 	r := cast(^Register_Manager_Dynamic)data
 	register_manager_free_content(&r.content, r.content_allocator)
 	saved := context.allocator
@@ -385,6 +388,7 @@ register_manager_make_dynamic :: proc(
 	data.allocator = allocator
 	data.getter = getter
 	data.setter = setter
+	data.allocator = allocator
 	reg.vtable = &register_manager_dynamic_vtable
 	reg.data = data
 	return reg

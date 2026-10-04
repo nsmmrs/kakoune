@@ -649,8 +649,10 @@ command_manager_expand_token_multi :: proc(
 	case .Register_Expand:
 		vals := register_manager_get_strings(content, ctx, allocator)
 		delete(content, allocator)
+		// Clone: params owns its strings (freed after the
+		// command), while vals borrows register content.
 		for v in vals {
-			append(params, v)
+			append(params, strings.clone(v, allocator))
 		}
 		delete(vals)
 		return .None, ""
@@ -1040,6 +1042,14 @@ command_manager_execute_single_command :: proc(
 	if call_err != .None {
 		return call_err, call_msg
 	}
+	// Key-handling errors cannot throw through void callbacks;
+	// convert a straggler stash here (C++: the throw escapes
+	// the command into execute).
+	if ctx.input_handler != nil {
+		if errmsg, _, failed := input_handler_take_key_error(ctx.input_handler, allocator); failed {
+			return .Error, errmsg
+		}
+	}
 
 	if profile_on {
 		microseconds := int(clock_diff(profile_start, clock_now())) / 1000
@@ -1069,15 +1079,10 @@ command_manager_execute :: proc(
 	allocator := context.allocator,
 ) -> (Commands_Error, string) {
 	parser := command_manager_parser_make(command_line)
-	// C++ Context::scope parity: innermost local scope, else window
-	// scope, else global. (The buffer fallback needs unmerged context
-	// procs; every real context here has a window.)
-	parent_scope := &scope_global_instance().scope
-	if len(ctx.local_scopes) > 0 {
-		parent_scope = ctx.local_scopes[len(ctx.local_scopes) - 1]
-	} else if ctx.window != nil {
-		parent_scope = &ctx.window.scope
-	}
+	// C++ LocalScope(context) parents to context.scope(): innermost
+	// local scope, else window, else buffer, else global. The buffer
+	// fallback matters for window-less draft contexts (hooks).
+	parent_scope := context_scope(ctx)
 	scope := scope_local_make(ctx, parent_scope, allocator)
 	defer scope_local_destroy(scope, allocator)
 	command_pos := 0

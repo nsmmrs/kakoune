@@ -505,3 +505,27 @@ test_insert_completer_select_tracks_replaced_range :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+// Regression: the inserted-ranges Selection conversion must not pre-fill
+// the temp array (make with len N plus N appends produced 2N entries and
+// an out-of-range write-back, crashing completion tests).
+@(test)
+test_insert_completer_update_inserted_ranges_keeps_count :: proc(t: ^testing.T) {
+	lines := [2]string{"first\n", "a\n"}
+	buf := buffer_test_make(lines[:])
+	defer buffer_destroy(buf)
+
+	c := Insert_Completer{}
+	defer delete(c.inserted_ranges)
+	append(
+		&c.inserted_ranges,
+		Buffer_Range{begin = Coord_Buffer{line = 1, column = 0}, end = Coord_Buffer{line = 1, column = 1}},
+	)
+	c.completions.timestamp = buffer_timestamp(buf)
+
+	insert_completer_update_inserted_ranges(&c, buf)
+
+	testing.expect_value(t, len(c.inserted_ranges), 1)
+	testing.expect_value(t, c.inserted_ranges[0].begin, Coord_Buffer{line = 1, column = 0})
+	testing.expect_value(t, c.inserted_ranges[0].end, Coord_Buffer{line = 1, column = 1})
+}

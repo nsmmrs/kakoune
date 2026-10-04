@@ -7,7 +7,10 @@
 // are GAPS (see summary).
 package kak
 
+import "core:mem"
+import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 
 // command_manager_check_quoted mirrors the C++ check_quoted lambda (the
@@ -493,4 +496,133 @@ command_manager_test_completer_lifecycle :: proc(t: ^testing.T) {
 	n := command_manager_nested_completer_make()
 	testing.expect_value(t, n.last_complete_command, "")
 	command_manager_nested_completer_destroy(&n)
+}
+
+@(test)
+command_manager_test_execute_aborts_list_on_error :: proc(t: ^testing.T) {
+	// Regression: a failing builtin must abort the `;` list (C++
+	// throws out of the command into execute). The void
+	// Command_Func.call cannot return the failure, so wrappers stash
+	// it on the context for execute_single_command to convert.
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	dir, derr := os.temp_directory(f.allocator)
+	testing.expect_value(t, derr, os.ERROR_NONE)
+	defer delete(dir, f.allocator)
+	target := strings.concatenate({dir, "/kak-cm-test-abort.txt"}, f.allocator)
+	defer delete(target, f.allocator)
+	defer os.remove(target)
+
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+	cmd := strings.concatenate(
+		{"fail stop-here; echo -to-file ", target, " -- reached"},
+		f.allocator,
+	)
+	defer delete(cmd, f.allocator)
+	exec_err, exec_msg := command_manager_execute(command_manager_instance(), cmd, &ctx, &sc, f.allocator)
+	defer if exec_err != .None {
+		delete(exec_msg, f.allocator)
+	}
+	// Fail propagates undecorated like the C++ failure.
+	testing.expect_value(t, exec_err, Commands_Error.Fail)
+	testing.expect_value(t, exec_msg, "stop-here")
+	// The echo past the `;` never ran.
+	_, stat_err := os.stat(target, f.allocator)
+	testing.expect(t, stat_err != os.ERROR_NONE)
+}
+
+@(test)
+command_manager_test_execute_failure_leaves_no_leaks :: proc(t: ^testing.T) {
+	// A failing builtin through execute must not leak: report
+	// consumes the message, and the headless status print destroys
+	// its lines (C++ moves the message into the throw; DisplayLines
+	// are RAII). Explicit teardowns so the leak check observes them.
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	// Baseline before setup: teardown frees setup allocations too,
+	// so only a pre-setup baseline cancels out.
+	testing.expect_value(t, context.allocator.procedure, mem.tracking_allocator_proc)
+	track := cast(^mem.Tracking_Allocator)context.allocator.data
+	baseline_count := len(track.allocation_map)
+	baseline_bad := len(track.bad_free_array)
+	f := test_commands_setup()
+	test_commands_setup_singletons(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+
+	sc := test_commands_make_shell(f)
+	exec_err, exec_msg := command_manager_execute(
+		command_manager_instance(),
+		"fail stop-here",
+		&ctx,
+		&sc,
+		f.allocator,
+	)
+	testing.expect_value(t, exec_err, Commands_Error.Fail)
+	testing.expect_value(t, exec_msg, "stop-here")
+	delete(exec_msg, f.allocator)
+	test_commands_free_shell(f, &sc)
+	context_destroy(&ctx)
+	test_commands_teardown_singletons()
+	test_commands_teardown(f)
+	testing.expect_value(t, len(track.allocation_map), baseline_count)
+	testing.expect_value(t, len(track.bad_free_array), baseline_bad)
+}
+
+@(test)
+command_manager_test_execute_buffer_option_fallback :: proc(t: ^testing.T) {
+	// Regression: execute's LocalScope must parent to the context
+	// buffer scope when no window or local scope applies (C++
+	// LocalScope(context) parents to context.scope()); parenting to
+	// global hid buffer-local options from window-less hook contexts.
+	sync.lock(&test_commands_singleton_mutex)
+	defer sync.unlock(&test_commands_singleton_mutex)
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	test_commands_setup_singletons(f)
+	defer test_commands_teardown_singletons()
+
+	reg := &f.global.global_data.option_registry
+	_, _ = option_manager_registry_declare(reg, "_", "", "")
+
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	// NOTE: no pinned local scope here: the window-less buffer
+	// context must fall back to the buffer scope on its own.
+
+	local, lerr := option_manager_get_local_option(&buf.scope.data.options, "_", f.allocator)
+	testing.expect_value(t, lerr, Option_Manager_Error.None)
+	_, _ = option_manager_option_set_from_strings(local, {"k"})
+
+	dir, derr := os.temp_directory(f.allocator)
+	testing.expect_value(t, derr, os.ERROR_NONE)
+	defer delete(dir, f.allocator)
+	target := strings.concatenate({dir, "/kak-cm-test-bufopt.txt"}, f.allocator)
+	defer delete(target, f.allocator)
+	defer os.remove(target)
+
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+	cmd := strings.concatenate({"echo -to-file ", target, " -- %opt{_}"}, f.allocator)
+	defer delete(cmd, f.allocator)
+	exec_err, exec_msg := command_manager_execute(command_manager_instance(), cmd, &ctx, &sc, f.allocator)
+	if exec_err != .None {
+		delete(exec_msg, f.allocator)
+	}
+	testing.expect_value(t, exec_err, Commands_Error.None)
+	data, rerr := file_read_file(target, false, f.allocator)
+	defer delete(data, f.allocator)
+	testing.expect_value(t, rerr, File_Error.None)
+	testing.expect_value(t, data, "k")
 }

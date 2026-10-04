@@ -23,7 +23,9 @@ User_Interface_Test_Stub :: struct {
 	refreshed:       bool,
 	forced:          bool,
 	on_key:          User_Interface_On_Key_Callback,
+	on_key_data:     rawptr,
 	on_paste:        User_Interface_On_Paste_Callback,
+	on_paste_data:   rawptr,
 	options_seen:    int,
 }
 

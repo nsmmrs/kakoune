@@ -12,6 +12,13 @@ import "core:strings"
 import "core:sync"
 import "core:testing"
 
+// main_test_env_mutex serializes the process-environment writers in
+// this file, completion_test, env_vars_test and file_test: the
+// runner is multithreaded and os.set_env/unset_env mutate the
+// process-global environ, so overlapping writers (e.g. the two
+// KAKOUNE_CONFIG_DIR tests below) flake.
+main_test_env_mutex: sync.Mutex
+
 // main_test_free_strings releases an owned string list.
 main_test_free_strings :: proc(list: [dynamic]string) {
 	for s in list {

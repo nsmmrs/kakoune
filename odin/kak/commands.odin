@@ -3824,6 +3824,15 @@ commands_nop :: proc() -> (Commands_Error, string) {
 	return .None, ""
 }
 
+// commands_scratch_initial_lines builds the initial lines of a fresh
+// scratch buffer (C++ edit passes create_buffer_from_string with empty
+// data, whose parse_lines yields a single "\n" line).
+commands_scratch_initial_lines :: proc(allocator := context.allocator) -> Buffer_Lines {
+	lines := make(Buffer_Lines, 1, allocator)
+	lines[0] = "\n"
+	return lines
+}
+
 // commands_edit opens a file or scratch buffer (C++ edit).
 commands_edit :: proc(
 	p: ^Parameters_Parser,
@@ -3849,11 +3858,15 @@ commands_edit :: proc(
 	}
 
 	name := ""
+	name_owned := false
+	defer if name_owned {
+		delete(name, allocator)
+	}
 	if parameters_parser_positional_count(p) > 0 {
 		name = parameters_parser_positional(p, 0)
 	} else if scratch {
 		name = commands_generate_buffer_name("*scratch-{}*", env.buffers, allocator)
-		defer delete(name, allocator)
+		name_owned = true
 	} else {
 		name = context_buffer(ctx).display_name
 	}
@@ -3885,8 +3898,7 @@ commands_edit :: proc(
 			if buffer != nil && force_reload {
 				_ = buffer_manager_delete(env.buffers, buffer)
 			}
-			lines := make(Buffer_Lines, 1, allocator)
-			lines[0] = ""
+			lines := commands_scratch_initial_lines(allocator)
 			made, merr := buffer_manager_create(
 				env.buffers,
 				name,
@@ -4727,13 +4739,17 @@ commands_define_command :: proc(
 		return commands_errorf("menu switch requires a completion switch", {}, allocator)
 	}
 	doc := ""
+	doc_owned := false
+	defer if doc_owned {
+		delete(doc, allocator)
+	}
 	if raw, ok := parameters_parser_get_switch(p, "docstring"); ok {
 		trimmed, terr := string_utils_trim_indent(raw, allocator)
 		if terr != .None {
 			return commands_errorf("inconsistent indentation in the string", {}, allocator)
 		}
 		doc = trimmed
-		defer delete(doc, allocator)
+		doc_owned = true
 	}
 
 	stored := new(Commands_Defined_Command, allocator)
@@ -5605,13 +5621,17 @@ commands_map :: proc(
 	}
 	defer delete(mapping)
 	doc := ""
+	doc_owned := false
+	defer if doc_owned {
+		delete(doc, allocator)
+	}
 	if raw, ok := parameters_parser_get_switch(p, "docstring"); ok {
 		trimmed, terr := string_utils_trim_indent(raw, allocator)
 		if terr != .None {
 			return commands_errorf("inconsistent indentation in the string", {}, allocator)
 		}
 		doc = trimmed
-		defer delete(doc, allocator)
+		doc_owned = true
 	}
 	_, atomic := parameters_parser_get_switch(p, "atomic")
 	keymap_manager_map_key(keymaps, key[0], mode, mapping[:], doc, atomic)
@@ -5728,6 +5748,9 @@ commands_execute_keys_body :: proc(
 			}
 		}
 		delete(keys)
+		if input_handler_has_key_error(handler) {
+			break
+		}
 	}
 	return .None, ""
 }
@@ -6869,10 +6892,14 @@ commands_enter_user_mode_impl :: proc(
 	defer delete(display, allocator)
 	title := mode_name
 	title_owned := ""
+	title_owned_live := false
+	defer if title_owned_live {
+		delete(title_owned, allocator)
+	}
 	if lock {
 		title_owned, _ = format_format("{} (lock)", {mode_name}, allocator)
 		title = title_owned
-		defer delete(title_owned, allocator)
+		title_owned_live = true
 	}
 	info := commands_build_autoinfo_for_mapping(ctx, mode, allocator)
 	defer delete(info, allocator)
@@ -6913,6 +6940,10 @@ commands_user_mode_call :: proc(data: rawptr, key: Keys_Key, ctx: ^Context) {
 		// are terminal within a key, so nothing live can be pending).
 		input_handler_clear_key_error(ctx.input_handler)
 		for k in keys_copy {
+			// C++ aborts the replay on the first throw.
+			if input_handler_has_key_error(ctx.input_handler) {
+				break
+			}
 			input_handler_handle_key(ctx.input_handler, k)
 			// A C++ throw aborts the replay; the flag stays set so
 			// an enclosing exec aborts too.

@@ -131,7 +131,15 @@ display_buffer_atom_trim_begin :: proc(atom: ^Display_Atom, count: Coord_Column)
 				coord = Coord_Buffer{coord.line + 1, 0}
 				continue
 			}
-			cp := utf8_read_codepoint(line, &pos)
+			// Bound the decode at the range end like C++
+			// read_codepoint(it, end): a truncated lead yields
+			// the byte without consuming past it, so coord can
+			// never overshoot end.
+			bound := len(line)
+			if coord.line == end.line {
+				bound = min(bound, int(end.column))
+			}
+			cp := utf8_read_codepoint(line[:bound], &pos)
 			res += Coord_Column(unicode_codepoint_width(cp))
 			coord = Coord_Buffer{coord.line, Coord_Byte(pos)}
 		}
@@ -162,7 +170,15 @@ display_buffer_atom_trim_end :: proc(atom: ^Display_Atom, count: Coord_Column) -
 				coord = Coord_Buffer{coord.line + 1, 0}
 				continue
 			}
-			cp := utf8_read_codepoint(line, &pos)
+			// Bound the decode at the range end like C++
+			// read_codepoint(it, end): a truncated lead yields
+			// the byte without consuming past it, so coord can
+			// never overshoot end.
+			bound := len(line)
+			if coord.line == end.line {
+				bound = min(bound, int(end.column))
+			}
+			cp := utf8_read_codepoint(line[:bound], &pos)
 			res += Coord_Column(unicode_codepoint_width(cp))
 			coord = Coord_Buffer{coord.line, Coord_Byte(pos)}
 		}
@@ -791,7 +807,15 @@ display_buffer_range_columns :: proc(buffer: ^Buffer, begin, end: Coord_Buffer) 
 			coord = Coord_Buffer{coord.line + 1, 0}
 			continue
 		}
-		cp := utf8_read_codepoint(line, &pos)
+		// Bound the decode at the range end like C++
+		// read_codepoint(it, end): a truncated lead yields the
+		// byte without consuming past it, so coord can never
+		// overshoot end.
+		bound := len(line)
+		if coord.line == end_norm.line {
+			bound = min(bound, int(end_norm.column))
+		}
+		cp := utf8_read_codepoint(line[:bound], &pos)
 		total += Coord_Column(unicode_codepoint_width(cp))
 		coord = Coord_Buffer{coord.line, Coord_Byte(pos)}
 	}
