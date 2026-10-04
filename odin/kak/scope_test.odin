@@ -1,5 +1,6 @@
 package kak
 
+import "core:mem"
 import "core:testing"
 
 @(test)
@@ -121,4 +122,35 @@ test_scope_local :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(ctx.local_scopes), 1)
 	scope_local_destroy(l1)
 	testing.expect_value(t, len(ctx.local_scopes), 0)
+}
+
+// Minimal child highlighter vtable for the root-group test: destroy
+// is a no-op since the child owns nothing.
+scope_test_dummy_destroy :: proc(data: rawptr, allocator: mem.Allocator) {
+	_ = data
+	_ = allocator
+}
+
+scope_test_dummy_vtable := Highlighter_VTable{
+	destroy = scope_test_dummy_destroy,
+}
+
+// Scope root groups are functional highlighter groups (regression:
+// they carried a nil vtable, so add-highlighter always failed with
+// "highlighter groups are unavailable").
+@(test)
+test_scope_highlighters_root_group_wired :: proc(t: ^testing.T) {
+	s := scope_make()
+	defer scope_destroy(&s)
+
+	root := &s.data.highlighters.group
+	testing.expect(t, root.base.vtable == &highlighters_group_vtable)
+	testing.expect(t, root.base.data == root)
+
+	// Exercise add-highlighter's path through the vtable.
+	child := new(Highlighter)
+	child.vtable = &scope_test_dummy_vtable
+	root.base.vtable.add_child(root.base.data, "kid", child, false)
+	found := root.base.vtable.get_child(root.base.data, "kid", context.allocator)
+	testing.expect(t, found == child)
 }

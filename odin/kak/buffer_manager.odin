@@ -117,6 +117,9 @@ buffer_manager_create :: proc(
 	if g := scope_global_instance(); g != nil {
 		scope_reparent(&buf.scope, &g.scope)
 	}
+	// C++ Buffer ctor records the decoded file attributes as local
+	// options (no-op for fixture buffers without the declarations).
+	buffer_set_file_options(buf, bom, eolformat, finaleol)
 	append(&m.buffers, buf)
 	buffer_on_registered(buf)
 	for trashed in m.buffer_trash {

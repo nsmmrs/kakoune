@@ -465,3 +465,26 @@ face_registry_test_high_byte_names_rejected :: proc(t: ^testing.T) {
 	_, err := face_registry_parse("n2z4K0\xc3")
 	testing.expect(t, err != Face_Registry_Error.None, "high-byte desc must not parse as base")
 }
+
+// Reparenting a root registry drops its builtin copies so they never
+// shadow the parent's entries (regression: buffer scopes kept stale
+// builtins, hiding colorscheme redefinitions like PrimaryCursor+fg).
+@(test)
+face_registry_test_reparent_drops_builtin_copies :: proc(t: ^testing.T) {
+	parent := face_registry_make(nil)
+	defer face_registry_destroy(&parent)
+	child := face_registry_make(nil)
+	defer face_registry_destroy(&child)
+
+	testing.expect_value(
+		t,
+		face_registry_add(&parent, "PrimaryCursor", "black,white+fg", true),
+		Face_Registry_Error.None,
+	)
+	face_registry_reparent(&child, &parent)
+
+	face, err := face_registry_lookup(&child, "PrimaryCursor")
+	testing.expect_value(t, err, Face_Registry_Error.None)
+	testing.expect(t, .Final_Fg in face.attributes)
+	testing.expect(t, .Final_Bg in face.attributes)
+}

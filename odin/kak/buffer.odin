@@ -93,11 +93,34 @@ buffer_final_eol_from_name :: proc(name: string) -> (mode: Final_Eol, ok: bool) 
 	return enum_from_name(buffer_final_eol_descs[:], name)
 }
 
+// buffer_set_file_option records one decoded file attribute as a
+// buffer-local option (port of the Buffer ctor/reload option sets).
+// Fixture buffers with no declared option in the parent chain keep
+// the inherited value instead.
+buffer_set_file_option :: proc(b: ^Buffer, name: string, value: Option_Value) {
+	mgr := &b.scope.data.options
+	opt, err := option_manager_get_local_option(mgr, name, mgr.allocator)
+	if err != .None {
+		return
+	}
+	set_err, _ := option_manager_option_set(opt, value, true)
+	assert(set_err == .None)
+}
+
+// buffer_set_file_options records the decoded BOM/EOL attributes as
+// buffer-local options (port of the Buffer ctor/reload option sets).
+buffer_set_file_options :: proc(b: ^Buffer, bom: Byte_Order_Mark, eolformat: Eol_Format, finaleol: Final_Eol) {
+	buffer_set_file_option(b, "BOM", bom)
+	buffer_set_file_option(b, "eolformat", eolformat)
+	buffer_set_file_option(b, "finaleol", finaleol)
+}
+
 // buffer_make creates a heap Buffer with cloned lines (each line must end
 // with '\n', as in C++). File buffers resolve the display name through
-// the merged file module. The bom/eolformat/finaleol values are accepted
-// for signature parity but option sync is deferred until option_manager
-// merges (see header). Free with buffer_destroy.
+// the merged file module. The bom/eolformat/finaleol values are applied
+// to the buffer-local options by buffer_manager_create after the scope
+// reparent (the fresh scope has no parent chain yet); direct fixture
+// callers keep inherited values. Free with buffer_destroy.
 buffer_make :: proc(
 	name: string,
 	flags: Buffer_Flags,
@@ -161,6 +184,7 @@ buffer_make :: proc(
 	data.keymaps = keymap_manager_init(allocator)
 	data.aliases = Alias_Registry{aliases = make(map[string]string, allocator), allocator = allocator}
 	data.faces = face_registry_make(nil, allocator)
+	// In-place init: the root group's base borrows &data.highlighters.group.
 	highlighters_init_child(&data.highlighters, nil, allocator)
 	b.scope.data = data
 	return b
@@ -205,8 +229,11 @@ buffer_destroy :: proc(b: ^Buffer) {
 		)
 		data.options.parent = nil
 	}
-	// Option entries are owned by their unmerged modules' paths;
-	// nothing can populate them yet, so drop the containers.
+	// Local options are populated by set paths (file attributes,
+	// :set); destroy each (the desc stays registry-owned).
+	for _, opt in data.options.options {
+		option_manager_option_destroy(opt)
+	}
 	delete(data.options.options)
 	delete(data.options.watchers)
 	delete(data.aliases.aliases)
@@ -217,7 +244,7 @@ buffer_destroy :: proc(b: ^Buffer) {
 	delete(data.hooks.hooks_trash)
 	keymap_manager_destroy(&data.keymaps)
 	face_registry_destroy(&data.faces)
-	scope_highlighters_destroy(&data.highlighters)
+	highlighters_destroy(&data.highlighters)
 	free(data, alloc)
 	free(b, alloc)
 }
@@ -1325,10 +1352,6 @@ buffer_reload :: proc(
 	finaleol: Final_Eol,
 	fs_status: File_Fs_Status,
 ) {
-	_ = bom
-	_ = eolformat
-	_ = finaleol
-
 	record_undo := .No_Undo not_in b.flags
 	buffer_commit_undo_group(b)
 
@@ -1408,6 +1431,9 @@ buffer_reload :: proc(
 	buffer_commit_undo_group(b)
 	b.last_save_history_id = b.history_id
 	b.fs_status = fs_status
+	// C++ Buffer::reload records the decoded file attributes as
+	// local options (no-op for fixture buffers without them).
+	buffer_set_file_options(b, bom, eolformat, finaleol)
 }
 
 // buffer_check_invariant asserts the line invariant (port of the

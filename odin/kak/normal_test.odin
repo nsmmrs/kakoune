@@ -667,3 +667,22 @@ normal_test_fail_records_key_error :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+// The : prompt count/register env entries are all owned, so prompt
+// teardown frees them cleanly (regression: string-literal keys
+// crashed normal_command_destroy with "free(): invalid pointer").
+@(test)
+normal_test_command_count_env_owned :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	alloc := mem.tracking_allocator(&track)
+
+	env_vars := normal_count_register_env_vars(3, 'a', alloc)
+	testing.expect_value(t, env_vars["count"], "3")
+	testing.expect_value(t, env_vars["register"], "a")
+	env_vars_free(&env_vars, alloc)
+
+	testing.expect_value(t, len(track.bad_free_array), 0)
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

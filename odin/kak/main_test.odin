@@ -581,3 +581,34 @@ test_main_dummy_ui :: proc(t: ^testing.T) {
 	defer main_destroy_ui(ui2, .Dummy)
 	testing.expect(t, ui2.vtable == ui.vtable)
 }
+
+// %val{selection} covers the max end inclusively across lines (port of
+// the C++ content()/char_length(); regression: a whole-line selection
+// expanded without its trailing newline).
+@(test)
+test_main_env_selection_content_inclusive :: proc(t: ^testing.T) {
+	lines := [2]string{"line 1\n", "line 2\n"}
+	buf := buffer_make("*test*", {}, lines[:], .None, .Lf, .Present, File_Fs_Status{})
+	defer buffer_destroy(buf)
+	sel := Selection{
+		basic = Basic_Selection{
+			anchor = Coord_Buffer{1, 0},
+			cursor = coord_buffer_and_target(Coord_Buffer{1, 6}),
+		},
+	}
+	content := main_env_selection_content(buf, sel, context.allocator)
+	defer delete(content, context.allocator)
+	testing.expect_value(t, content, "line 2\n")
+	testing.expect_value(t, main_env_char_length(buf, sel), 7)
+
+	multi := Selection{
+		basic = Basic_Selection{
+			anchor = Coord_Buffer{0, 5},
+			cursor = coord_buffer_and_target(Coord_Buffer{1, 3}),
+		},
+	}
+	mcontent := main_env_selection_content(buf, multi, context.allocator)
+	defer delete(mcontent, context.allocator)
+	testing.expect_value(t, mcontent, "1\nline")
+	testing.expect_value(t, main_env_char_length(buf, multi), 6)
+}

@@ -435,6 +435,7 @@ highlighters_init_child :: proc(highlighters: ^Highlighters, parent: ^Highlighte
 		data   = &highlighters.group,
 	}
 	highlighters.group.highlighters = make(map[string]^Highlighter, allocator)
+	highlighters.group.order = make([dynamic]string, allocator)
 	highlighters.group.allocator = allocator
 }
 
@@ -487,16 +488,16 @@ highlighters_group_do_highlight :: proc(
 	display_buffer: ^Display_Buffer,
 	buffer_range: Buffer_Range,
 ) {
-	for _, child in group.highlighters {
-		highlighter_highlight(child, hctx, display_buffer, buffer_range)
+	for name in group.order {
+		highlighter_highlight(group.highlighters[name], hctx, display_buffer, buffer_range)
 	}
 }
 
 // highlighters_group_do_compute_display_setup runs every child's setup
 // (port of HighlighterGroup::do_compute_display_setup).
 highlighters_group_do_compute_display_setup :: proc(group: ^Highlighter_Group, hctx: Highlight_Context, setup: ^Display_Setup) {
-	for _, child in group.highlighters {
-		highlighter_compute_display_setup(child, hctx, setup)
+	for name in group.order {
+		highlighter_compute_display_setup(group.highlighters[name], hctx, setup)
 	}
 }
 
@@ -504,8 +505,8 @@ highlighters_group_do_compute_display_setup :: proc(group: ^Highlighter_Group, h
 // child (port of HighlighterGroup::fill_unique_ids). Appended ids borrow
 // child memory (static strings).
 highlighters_group_fill_unique_ids :: proc(group: ^Highlighter_Group, unique_ids: ^[dynamic]string) {
-	for _, child in group.highlighters {
-		highlighter_fill_unique_ids(child, unique_ids)
+	for name in group.order {
+		highlighter_fill_unique_ids(group.highlighters[name], unique_ids)
 	}
 }
 
@@ -532,6 +533,7 @@ highlighters_group_add_child :: proc(
 	}
 	key := strings.clone(name, group.allocator)
 	group.highlighters[key] = child
+	append(&group.order, strings.clone(name, group.allocator))
 	return .None
 }
 
@@ -545,6 +547,13 @@ highlighters_group_remove_child :: proc(group: ^Highlighter_Group, id: string) -
 			free(child, group.allocator)
 			delete_key(&group.highlighters, key)
 			delete(key, group.allocator)
+			for entry, i in group.order {
+				if entry == id {
+					delete(group.order[i], group.allocator)
+					ordered_remove(&group.order, i)
+					break
+				}
+			}
 			return .None
 		}
 	}
@@ -593,7 +602,8 @@ highlighters_group_complete_child :: proc(
 		)
 	}
 	names := make([dynamic]string, 0, len(group.highlighters), context.temp_allocator)
-	for name, child in group.highlighters {
+	for name in group.order {
+		child := group.highlighters[name]
 		if complete_group && !highlighter_has_children(child) {
 			continue
 		}
@@ -620,6 +630,10 @@ highlighters_group_destroy_contents :: proc(group: ^Highlighter_Group) {
 		delete(key, group.allocator)
 		free(child, group.allocator)
 	}
+	for entry in group.order {
+		delete(entry, group.allocator)
+	}
+	delete(group.order)
 	delete(group.highlighters)
 }
 
@@ -2390,6 +2404,7 @@ Highlighters_Region_Data :: struct {
 // the C++ buffer-side cache).
 Highlighters_Regions_Data :: struct {
 	regions:        map[string]^Highlighter, // owned region wrappers
+	order:          [dynamic]string, // insertion order; owns clones of names
 	default_region: string, // owned, "" when none
 	allocator:      mem.Allocator,
 }
@@ -2399,6 +2414,7 @@ Highlighters_Regions_Data :: struct {
 highlighters_regions_make :: proc(allocator := context.allocator) -> ^Highlighter {
 	data := new(Highlighters_Regions_Data, allocator)
 	data.regions = make(map[string]^Highlighter, allocator)
+	data.order = make([dynamic]string, data.allocator)
 	data.allocator = allocator
 	return highlighter_make_owned({.Colorize}, &highlighters_regions_vtable, data, allocator)
 }
@@ -2567,6 +2583,7 @@ highlighters_regions_add_child :: proc(
 	}
 	key := strings.clone(name, data.allocator)
 	data.regions[key] = child
+	append(&data.order, strings.clone(name, data.allocator))
 	return .None
 }
 
@@ -2581,6 +2598,13 @@ highlighters_regions_remove_child :: proc(data: ^Highlighters_Regions_Data, id: 
 			free(child, data.allocator)
 			delete_key(&data.regions, key)
 			delete(key, data.allocator)
+			for entry, i in data.order {
+				if entry == id {
+					delete(data.order[i], data.allocator)
+					ordered_remove(&data.order, i)
+					break
+				}
+			}
 			return .None
 		}
 	}
@@ -2625,7 +2649,7 @@ highlighters_regions_complete_child :: proc(
 		)
 	}
 	names := make([dynamic]string, 0, len(data.regions), context.temp_allocator)
-	for name in data.regions {
+	for name in data.order {
 		append(&names, name)
 	}
 	flags := Completion_Flags{.Menu} if !complete_group else Completion_Flags{}
@@ -2692,6 +2716,10 @@ highlighters_regions_vtable_destroy :: proc(data: rawptr, allocator: mem.Allocat
 		free(child, data.allocator)
 		delete(key, data.allocator)
 	}
+	for entry in data.order {
+		delete(entry, data.allocator)
+	}
+	delete(data.order)
 	delete(data.regions)
 	delete(data.default_region, data.allocator)
 	free(data, allocator)
@@ -2912,7 +2940,8 @@ highlighters_regions_compute :: proc(
 	range: Buffer_Range,
 ) -> [dynamic]Highlighters_Region {
 	region_list := make([dynamic]^Highlighter, 0, len(data.regions), context.temp_allocator)
-	for _, child in data.regions {
+	for name in data.order {
+		child := data.regions[name]
 		if !(cast(^Highlighters_Region_Data)child.data).is_default {
 			append(&region_list, child)
 		}
@@ -3492,6 +3521,7 @@ highlighters_create_group :: proc(params: Highlighter_Params, parent: ^Highlight
 	group := new(Highlighter_Group, allocator)
 	group.base = Highlighter{vtable = &highlighters_group_vtable, passes = passes, data = group}
 	group.highlighters = make(map[string]^Highlighter, allocator)
+	group.order = make([dynamic]string, allocator)
 	group.allocator = allocator
 	return &group.base
 }

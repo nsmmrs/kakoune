@@ -53,6 +53,9 @@ Command_Manager_Error :: enum {
 	Kill_Session,
 	// C++ runtime_error/parse_error, detail carried in the owned msg.
 	Error,
+	// C++ no_selections_remaining: decorates like Error, but
+	// -itersel catches it per iteration.
+	No_Selections,
 }
 
 // Command_Manager_Parse_Result is the C++ ParseResult: owned content plus

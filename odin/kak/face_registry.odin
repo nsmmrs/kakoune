@@ -156,7 +156,19 @@ face_registry_destroy :: proc(reg: ^Face_Registry) {
 
 // face_registry_reparent repoints the parent scope (port of C++
 // FaceRegistry::reparent).
+// face_registry_reparent chains reg under parent. A root registry
+// preloads the builtin faces; once chained those copies would shadow
+// the parent's entries (e.g. colorscheme redefinitions), so they are
+// dropped (buffer scopes are the only root-to-child transition; local
+// scopes are never roots and keep their faces).
 face_registry_reparent :: proc(reg: ^Face_Registry, parent: ^Face_Registry) {
+	if reg.parent == nil {
+		for key, spec in reg.faces {
+			delete(key, reg.allocator)
+			delete(spec.base, reg.allocator)
+		}
+		clear(&reg.faces)
+	}
 	reg.parent = parent
 }
 

@@ -995,6 +995,51 @@ test_commands_write_readonly :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Commands_Error.Error)
 }
 
+// :write honors the context finaleol (port of the C++ override;
+// regression: Missing wrote a trailing newline, and `set local`
+// inside eval could not add one back).
+@(test)
+test_commands_write_finaleol_override :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	reg := scope_global_option_registry(f.global)
+	_, _ = option_manager_registry_declare(reg, "eolformat", "", Eol_Format.Lf)
+	_, _ = option_manager_registry_declare(reg, "finaleol", "", Final_Eol.Present)
+	_, _ = option_manager_registry_declare(reg, "BOM", "", Byte_Order_Mark.None)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello\n"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	dir, derr := os.temp_directory(f.allocator)
+	testing.expect_value(t, derr, os.ERROR_NONE)
+	defer delete(dir, f.allocator)
+	target := strings.concatenate({dir, "/kak-cmd-test-finaleol.txt"}, f.allocator)
+	defer delete(target, f.allocator)
+	defer os.remove(target)
+
+	buffer_set_file_options(buf, .None, .Lf, .Missing)
+	werr, wmsg := commands_do_write_buffer(&ctx, target, false, false, nil, f.allocator)
+	if werr != .None {
+		test_commands_free_msg(wmsg, f.allocator)
+	}
+	testing.expect_value(t, werr, Commands_Error.None)
+	data, rok := os.read_entire_file(target, f.allocator)
+	testing.expect_value(t, rok, os.ERROR_NONE)
+	defer delete(data, f.allocator)
+	testing.expect_value(t, string(data), "hello")
+
+	buffer_set_file_options(buf, .None, .Lf, .Present)
+	werr, wmsg = commands_do_write_buffer(&ctx, target, true, false, nil, f.allocator)
+	if werr != .None {
+		test_commands_free_msg(wmsg, f.allocator)
+	}
+	testing.expect_value(t, werr, Commands_Error.None)
+	data2, rok2 := os.read_entire_file(target, f.allocator)
+	testing.expect_value(t, rok2, os.ERROR_NONE)
+	defer delete(data2, f.allocator)
+	testing.expect_value(t, string(data2), "hello\n")
+}
+
 @(test)
 test_commands_write_all_clean :: proc(t: ^testing.T) {
 	f := test_commands_setup()
@@ -3086,6 +3131,66 @@ test_commands_context_wrap_save_regs :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Commands_Error.Error)
 }
 
+// The -itersel stub below discards the line-0 iteration (C++
+// no_selections_remaining) and succeeds otherwise.
+test_commands_itersel_skip_line_zero :: proc(
+	p: ^Parameters_Parser,
+	ctx: ^Context,
+	shell_ctx: ^Shell_Context,
+	env: ^Commands_Env,
+	allocator: mem.Allocator,
+) -> (Commands_Error, string) {
+	_ = p
+	_ = shell_ctx
+	_ = env
+	sels := context_selections_write_only(ctx)
+	if sels.selections[0].anchor.line == 0 {
+		return .No_Selections_Remaining, strings.clone("no selections remaining", allocator)
+	}
+	return .None, ""
+}
+
+// -itersel skips iterations that discard their selection and only
+// fails when every iteration does (port of the C++
+// catch (no_selections_remaining) in context_wrap).
+@(test)
+test_commands_itersel_skips_discarded_selections :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello", "world"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+
+	p, spec, _ := test_commands_parse(f, "select", {"1.1,1.3", "2.2,2.4"})
+	defer test_commands_free_parse(f, &p, &spec)
+	serr, smsg := commands_select(&p, &ctx, f.allocator)
+	if serr != .None {
+		test_commands_free_msg(smsg, f.allocator)
+	}
+	testing.expect_value(t, serr, Commands_Error.None)
+
+	pars: Parameters_Parser
+	err, msg := commands_context_wrap_itersel(
+		&pars,
+		&ctx,
+		&ctx,
+		false,
+		&sc,
+		&f.env,
+		test_commands_itersel_skip_line_zero,
+		f.allocator,
+	)
+	if err != .None {
+		test_commands_free_msg(msg, f.allocator)
+	}
+	testing.expect_value(t, err, Commands_Error.None)
+	sels := context_selections_write_only(&ctx)
+	testing.expect_value(t, len(sels.selections), 1)
+	testing.expect_value(t, sels.selections[0].anchor.line, Coord_Line(1))
+}
+
 @(test)
 test_commands_profile_hash_maps :: proc(t: ^testing.T) {
 	// One small profiling pass through the claimed buffer-manager
@@ -3267,4 +3372,29 @@ test_commands_dispatch_propagates_failures :: proc(t: ^testing.T) {
 	err5, msg5 := run(t, f, &ctx, &sc, "try %{kill} catch %{nop}")
 	defer test_commands_free_msg(msg5, f.allocator)
 	testing.expect_value(t, err5, Commands_Error.Kill_Session)
+}
+
+// The "shared" highlighter scope is the highlighters singleton group
+// (regression: commands kept a separate nil-vtable shell, so
+// add-highlighter shared/... always failed).
+@(test)
+test_commands_shared_scope_uses_singleton :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	// Without the singleton the scope does not exist.
+	sync.mutex_lock(&highlighters_test_shared_mutex)
+	testing.expect(t, !highlighters_shared_has_instance)
+	testing.expect(t, commands_highlighter_group_for_scope("shared", &ctx, &f.env) == nil)
+	sync.mutex_unlock(&highlighters_test_shared_mutex)
+
+	highlighters_test_shared_setup(f.allocator)
+	defer highlighters_test_shared_teardown()
+	group := commands_highlighter_group_for_scope("shared", &ctx, &f.env)
+	testing.expect(t, group != nil)
+	testing.expect(t, group == &highlighters_shared_instance().group)
+	testing.expect(t, group.base.vtable == &highlighters_group_vtable)
 }

@@ -58,30 +58,6 @@ scope_hook_data_destroy :: proc(hd: ^Hook_Data, allocator := context.allocator) 
 	free(hd, allocator)
 }
 
-// scope_highlighters_init builds highlighters state with parent (C++
-// Highlighters ctors: parent link plus an All-passes root group). The
-// root group is wired in place: its vtable data points at the group
-// itself, so a by-value return would dangle.
-scope_highlighters_init :: proc(h: ^Highlighters, parent: ^Highlighters, allocator := context.allocator) {
-	highlighters_init_child(h, parent, allocator)
-}
-
-// scope_highlighters_destroy frees the root group. Children destroy
-// through their vtable when present, then their heap shell is freed;
-// coordinator: adjust if the highlighter module allocates children
-// differently (no child-adding proc exists yet, so groups are always
-// empty in standalone use).
-scope_highlighters_destroy :: proc(h: ^Highlighters) {
-	for k, child in h.group.highlighters {
-		if child.vtable != nil && child.vtable.destroy != nil {
-			child.vtable.destroy(child.data, h.group.allocator)
-		}
-		delete(k, h.group.allocator)
-		free(child, h.group.allocator)
-	}
-	delete(h.group.highlighters)
-}
-
 // scope_make builds a root scope with fresh managers (C++ Scope()).
 scope_make :: proc(allocator := context.allocator) -> Scope {
 	data := new(Scope_Data, allocator)
@@ -90,7 +66,8 @@ scope_make :: proc(allocator := context.allocator) -> Scope {
 	data.keymaps = keymap_manager_init(allocator)
 	data.aliases = alias_registry_make_root(allocator)
 	data.faces = face_registry_make(nil, allocator)
-	scope_highlighters_init(&data.highlighters, nil, allocator)
+	// In-place init: the root group's base borrows &data.highlighters.group.
+	highlighters_init_child(&data.highlighters, nil, allocator)
 	return Scope{data = data}
 }
 
@@ -103,7 +80,7 @@ scope_make_child :: proc(parent: ^Scope, allocator := context.allocator) -> Scop
 	data.keymaps = keymap_manager_init_child(&parent.data.keymaps, allocator)
 	data.aliases = alias_registry_make_child(&parent.data.aliases, allocator)
 	data.faces = face_registry_make(&parent.data.faces, allocator)
-	scope_highlighters_init(&data.highlighters, &parent.data.highlighters, allocator)
+	highlighters_init_child(&data.highlighters, &parent.data.highlighters, allocator)
 	return Scope{data = data}
 }
 
@@ -111,7 +88,7 @@ scope_make_child :: proc(parent: ^Scope, allocator := context.allocator) -> Scop
 // destroys members in reverse declaration order). Destroy child scopes
 // first: their option managers watch this one's.
 scope_destroy :: proc(s: ^Scope, allocator := context.allocator) {
-	scope_highlighters_destroy(&s.data.highlighters)
+	highlighters_destroy(&s.data.highlighters)
 	face_registry_destroy(&s.data.faces)
 	alias_registry_destroy(&s.data.aliases)
 	keymap_manager_destroy(&s.data.keymaps)

@@ -402,3 +402,45 @@ register_manager_test_complete_name :: proc(t: ^testing.T) {
 	defer delete(none)
 	testing.expect_value(t, len(none), 0)
 }
+
+// Register content survives the producer freeing its values (regression:
+// set stored borrows, so history entries dangled once the prompt line
+// was freed, and %reg expansion crashed freeing borrowed params).
+@(test)
+register_manager_test_set_owns_content :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	alloc := mem.tracking_allocator(&track)
+
+	reg := register_manager_make_static("a", alloc)
+	register_manager_test_disable_hooks(reg)
+
+	// Producer values freed right after set, like command params and
+	// the prompt line editor.
+	v0 := strings.clone("x", alloc)
+	v1 := strings.clone("y", alloc)
+	register_manager_set(reg, nil, []string{v0, v1})
+	delete(v0, alloc)
+	delete(v1, alloc)
+
+	got := register_manager_get_values(reg, nil)
+	testing.expect_value(t, len(got), 2)
+	testing.expect_value(t, got[0], "x")
+	testing.expect_value(t, got[1], "y")
+
+	// Save owns its strings too: reassigning must not affect it.
+	saved := register_manager_save(reg, nil, alloc)
+	register_manager_set(reg, nil, {"z"})
+	testing.expect_value(t, len(saved), 2)
+	testing.expect_value(t, saved[0], "x")
+	testing.expect_value(t, saved[1], "y")
+	for s in saved {
+		delete(s, alloc)
+	}
+	delete(saved)
+
+	register_manager_destroy_register(reg, alloc)
+	testing.expect_value(t, len(track.bad_free_array), 0)
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

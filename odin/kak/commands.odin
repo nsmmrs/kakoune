@@ -24,9 +24,9 @@
 //   * write_to_debug_buffer is implemented here over buffer_manager
 //     (the debug module is unmerged); commands_version stands in for
 //     main.cc's version string.
-//   * Scope highlighter groups currently carry a nil vtable (the
-//     highlighters module is unmerged), so add/remove-highlighter report
-//     an error instead of crashing; the logic is complete otherwise.
+//   * Scope highlighter groups are wired to the highlighters module
+//     group vtable at init; add/remove-highlighter still guard a nil
+//     vtable defensively instead of crashing.
 //   * quit without a client returns an error instead of asserting
 //     like the C++.
 //   * Without an installed server singleton, wrappers use
@@ -190,6 +190,13 @@ commands_join_positionals :: proc(
 // commands_report surfaces a core result through the status line (the
 // wrapper path). Success is silent; the message is borrowed by the
 // stored status line and never freed (client convention).
+// commands_report records a command body failure for the context
+// (port of the C++ throw escaping the command body): nothing is
+// printed here, so try/catch observes the failure without status
+// noise, exactly like the C++. execute_single_command takes the
+// record and execution boundaries print uncaught errors (client
+// creation, pending key inputs, the remote accepter). Kill_Session is
+// not recorded: the C++ try/catch does not catch kill_session either.
 commands_report :: proc(err: Commands_Error, msg: string, ctx: ^Context) {
 	if err == .None {
 		return
@@ -201,8 +208,6 @@ commands_report :: proc(err: Commands_Error, msg: string, ctx: ^Context) {
 	if f, ferr := face_registry_lookup(context_faces(ctx), "Error", ctx.allocator); ferr == .None {
 		face = f
 	}
-	line := client_display_line_from_text(msg, face, ctx.allocator)
-	context_print_status_simple(ctx, line)
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +643,14 @@ commands_do_write_buffer :: proc(
 	if sync {
 		wflags += {.Sync}
 	}
-	if werr := buffer_utils_write_buffer_to_file(buffer, effective, write_method, wflags); werr != .None {
+	// C++ do_write_buffer reads finaleol from the context scope (so
+	// `set local` inside eval applies) and passes it as an override.
+	fe_val, fe_err, fe_msg := commands_option_value(ctx, "finaleol", allocator)
+	if fe_err != .None {
+		return fe_err, fe_msg
+	}
+	fe_override: Maybe(Final_Eol) = fe_val.(Final_Eol)
+	if werr := buffer_utils_write_buffer_to_file(buffer, effective, write_method, wflags, fe_override); werr != .None {
 		return commands_errorf("{}: {}", {effective, buffer_utils_error_message(werr)}, allocator)
 	}
 	hook_manager_run_hook(context_hooks(ctx), .Buf_Write_Post, effective, ctx)
@@ -779,30 +791,20 @@ commands_cycle_buffer :: proc(
 	}
 }
 
-// commands_shared_highlighters is the port of SharedHighlighters,
-// wired lazily by commands_highlighter_group_for_scope (a global has
-// no construction point; the group data points at itself).
-commands_shared_highlighters := Highlighter_Group{}
-
 // commands_highlighter_group_for_scope resolves the highlighter group
 // for a scope prefix (C++ highlighter_cmd_completer / get_highlighter).
+// "shared" is the highlighters module singleton (initialized by the
+// server startup); without it the scope does not exist.
 commands_highlighter_group_for_scope :: proc(
 	scope_name: string,
 	ctx: ^Context,
 	env: ^Commands_Env,
 ) -> ^Highlighter_Group {
 	if scope_name == "shared" {
-		group := &commands_shared_highlighters
-		if group.base.vtable == nil {
-			group.base = Highlighter{
-				vtable = &highlighters_group_vtable,
-				passes = highlighters_pass_all,
-				data   = group,
-			}
-			group.highlighters = make(map[string]^Highlighter, context.allocator)
-			group.allocator = context.allocator
+		if !highlighters_shared_has_instance {
+			return nil
 		}
-		return group
+		return &highlighters_shared_instance().group
 	}
 	if s := commands_scope_ifp(scope_name, ctx, env.buffers, env.global); s != nil {
 		return &s.data.highlighters.group
@@ -875,9 +877,13 @@ commands_get_highlighter :: proc(
 // root is affected (C++ redraw_relevant_clients).
 commands_redraw_relevant_clients :: proc(ctx: ^Context, env: ^Commands_Env, root: ^Highlighter_Group) {
 	global_group := &env.global.scope.data.highlighters.group
+	shared_group: ^Highlighter_Group
+	if highlighters_shared_has_instance {
+		shared_group = &highlighters_shared_instance().group
+	}
 	for client in env.clients.clients {
 		cctx := client_context(client)
-		hit := root == &commands_shared_highlighters || root == global_group
+		hit := (shared_group != nil && root == shared_group) || root == global_group
 		if !hit && context_has_buffer(cctx) {
 			hit = root == &context_buffer(cctx).scope.data.highlighters.group
 		}
@@ -1235,6 +1241,9 @@ commands_context_wrap_itersel :: proc(
 			continue
 		}
 		if ferr != .None {
+			for &s in new_sels {
+				selection_destroy(&s, allocator)
+			}
 			return ferr, fmsg
 		}
 		succeeded = true
@@ -1255,7 +1264,10 @@ commands_context_wrap_itersel :: proc(
 			middle := len(new_sels)
 			current := context_selections_write_only(ctx)
 			for s in current.selections {
-				append(&new_sels, s)
+				// Deep copy: the C++ insert copies refcounted
+				// selections, but Odin captures are owned strings
+				// and the next iteration destroys current's list.
+				append(&new_sels, selection_clone(s, allocator))
 			}
 			selection_inplace_merge(&new_sels, middle, allocator)
 		}
@@ -5704,9 +5716,8 @@ commands_execute_keys_body :: proc(
 		if kerr != .None {
 			return kerr, kmsg
 		}
-		failed := false
-		fail_msg := ""
 		for key in keys {
+			input_handler_clear_key_error(handler)
 			input_handler_handle_key(handler, key)
 			if fail_msg, fail_kind, failed := input_handler_take_key_error(handler, allocator); failed {
 				delete(keys)
@@ -5717,9 +5728,6 @@ commands_execute_keys_body :: proc(
 			}
 		}
 		delete(keys)
-		if failed {
-			return .Error, fail_msg
-		}
 	}
 	return .None, ""
 }

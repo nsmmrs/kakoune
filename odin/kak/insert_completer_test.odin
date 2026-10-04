@@ -452,3 +452,56 @@ test_insert_completer_select_round_trip_restores_original :: proc(t: ^testing.T)
 	testing.expect_value(t, c.current_candidate, 1)
 	testing.expect_value(t, buffer_line(b, 0), "\n")
 }
+
+// Repeated relative selection replaces the previous candidate (the
+// tracked range follows the post-replace cursor like the C++ live
+// reference; regression: a stale pre-replace copy left the first
+// candidate in place on the second <c-n>).
+@(test)
+test_insert_completer_select_tracks_replaced_range :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+
+	{
+		context.allocator = alloc
+		lines := [1]string{"                          \n"}
+		buf := buffer_make("*test*", {}, lines[:], .None, .Lf, .Present, File_Fs_Status{})
+		defer buffer_destroy(buf)
+		sel := Selection{basic = Basic_Selection{anchor = {0, 26}, cursor = Coord_Buffer_And_Target{coord = {0, 26}}}}
+		sels := selection_list_make_single(buf, sel, buffer_timestamp(buf), alloc)
+		ctx: Context
+		context_init(&ctx, nil, sels, {}, "test", alloc)
+		selection_list_destroy(&sels)
+		defer context_destroy(&ctx)
+
+		opts: Option_Manager
+		option_manager_init_root(&opts, alloc)
+		defer option_manager_destroy(&opts)
+		c := Insert_Completer{ctx = &ctx, options = &opts, current_candidate = 2, enabled = true}
+		append(&c.completions.candidates, insert_completer_test_candidate("w111111"))
+		append(&c.completions.candidates, insert_completer_test_candidate("w222222"))
+		append(&c.completions.candidates, insert_completer_test_candidate(""))
+		c.completions.begin = Coord_Buffer{0, 26}
+		c.completions.end = Coord_Buffer{0, 26}
+		defer insert_completer_destroy(&c)
+
+		insert_completer_select(&c, 1, true, nil, nil)
+		testing.expect_value(t, c.current_candidate, 0)
+		testing.expect_value(t, buffer_line(buf, 0), "                          w111111\n")
+		testing.expect_value(t, c.completions.begin, Coord_Buffer{0, 26})
+		testing.expect_value(t, c.completions.end, Coord_Buffer{0, 33})
+
+		insert_completer_select(&c, 1, true, nil, nil)
+		testing.expect_value(t, c.current_candidate, 1)
+		testing.expect_value(t, buffer_line(buf, 0), "                          w222222\n")
+
+		// Accepting updates the inserted ranges in place (regression:
+		// a length/capacity mix-up indexed past the range list).
+		insert_completer_reset(&c)
+		testing.expect_value(t, len(c.completions.candidates), 0)
+	}
+
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

@@ -905,12 +905,25 @@ main_codepoint_string :: proc(c: rune, allocator := context.allocator) -> string
 
 // main_env_selection_content returns the owned text of sel in buf.
 main_env_selection_content :: proc(buf: ^Buffer, sel: Selection, allocator: mem.Allocator) -> string {
-	return strings.clone(buffer_substr(buf, selection_basic_min(sel.basic), selection_basic_max(sel.basic)), allocator)
+	// C++ content(): the max end is inclusive (multi-line aware).
+	return buffer_string(
+		buf,
+		selection_basic_min(sel.basic),
+		buffer_char_next(buf, selection_basic_max(sel.basic)),
+		allocator,
+	)
 }
 
 // main_env_char_length counts the characters covered by sel in buf.
 main_env_char_length :: proc(buf: ^Buffer, sel: Selection) -> int {
-	return utf8.rune_count(buffer_substr(buf, selection_basic_min(sel.basic), selection_basic_max(sel.basic)))
+	// C++ char_length(): inclusive of the max end.
+	s := buffer_string(
+		buf,
+		selection_basic_min(sel.basic),
+		buffer_char_next(buf, selection_basic_max(sel.basic)),
+		context.temp_allocator,
+	)
+	return utf8.rune_count(s)
 }
 
 // main_env_opt_int reads an int option, returning fallback when missing.
@@ -1613,6 +1626,7 @@ main_run_server :: proc(
 	command_manager_init_singleton(allocator)
 	register_manager_instance_init(allocator)
 	highlighter_registry_instance_init(allocator)
+	highlighters_shared_init(allocator)
 	client_manager_instance_init(allocator)
 	buffer_manager_instance_init(allocator)
 

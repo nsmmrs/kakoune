@@ -89,18 +89,21 @@ register_manager_run_modified_hook :: proc(reg: ^Register, name: string, ctx: ^C
 }
 
 // register_manager_replace_content frees the old strings and clones
-// values in (C++ StringList assignment copies).
+// values in (C++ StringList assignment copies). Clones first so
+// values aliasing the old content (self-assign) stay valid.
 @(private = "file")
 register_manager_replace_content :: proc(content: ^[dynamic]string, values: []string, allocator: mem.Allocator) {
+	saved := context.allocator
+	context.allocator = allocator
+	fresh := make([dynamic]string, 0, len(values), allocator)
+	for v in values {
+		append(&fresh, strings.clone(v, allocator))
+	}
 	for s in content^ {
 		delete(s, allocator)
 	}
-	clear(content)
-	saved := context.allocator
-	context.allocator = allocator
-	for v in values {
-		append(content, strings.clone(v, allocator))
-	}
+	delete(content^)
+	content^ = fresh
 	context.allocator = saved
 }
 
@@ -158,25 +161,37 @@ register_manager_history_set :: proc(data: rawptr, ctx: ^Context, values: []stri
 	context.allocator = r.allocator
 	defer context.allocator = saved
 	if restoring {
-		register_manager_replace_content(&r.content, values, r.allocator)
-		w := 0
+		// Clone first so values aliasing the old content stay
+		// valid while it is freed; drop empty entries like the C++.
+		fresh := make([dynamic]string, 0, len(values), r.allocator)
+		for v in values {
+			append(&fresh, strings.clone(v, r.allocator))
+		}
 		for s in r.content {
+			delete(s, r.allocator)
+		}
+		delete(r.content)
+		w := 0
+		for s in fresh {
 			if len(s) > 0 {
-				r.content[w] = s
+				fresh[w] = s
 				w += 1
 			} else {
 				delete(s, r.allocator)
 			}
 		}
-		resize(&r.content, w)
+		resize(&fresh, w)
+		r.content = fresh
 		register_manager_run_modified_hook(r.register, r.name, ctx)
 		return
 	}
 	for i := len(values) - 1; i >= 0; i -= 1 {
-		entry := values[i]
+		// Clone before the dedup sweep: values[i] may alias a
+		// dropped duplicate that is freed below.
+		owned := strings.clone(values[i], r.allocator)
 		w := 0
 		for s in r.content {
-			if s != entry {
+			if s != owned {
 				r.content[w] = s
 				w += 1
 			} else {
@@ -184,7 +199,7 @@ register_manager_history_set :: proc(data: rawptr, ctx: ^Context, values: []stri
 			}
 		}
 		resize(&r.content, w)
-		inject_at(&r.content, 0, strings.clone(entry, r.allocator))
+		inject_at(&r.content, 0, owned)
 	}
 	if len(r.content) > 1000 {
 		for s in r.content[1000:] {

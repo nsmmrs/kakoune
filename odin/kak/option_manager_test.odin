@@ -1024,6 +1024,9 @@ option_manager_test_flags_options :: proc(t: ^testing.T) {
 	// A trailing separator leaves an empty part, which is an error.
 	_, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert|"})
 	testing.expect_value(t, err, Option_Manager_Error.Convert)
+	// Interior empty parts are errors too.
+	_, err, _ = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert||prompt"})
+	testing.expect_value(t, err, Option_Manager_Error.Convert)
 	_, err, fmsg = option_manager_value_from_strings(Option_Value(Auto_Complete{}), {"insert", "prompt"})
 	testing.expect_value(t, err, Option_Manager_Error.Convert)
 	testing.expect_value(t, fmsg, "expected a single value for option")
@@ -1206,6 +1209,46 @@ option_manager_test_empty_flags_string :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	_, ok = option_manager_flags_from_string(
 		Auto_Info, Auto_Info_Flag, "nope", option_manager_AUTO_INFO_DESCS[:],
+	)
+	testing.expect(t, !ok)
+}
+
+// Empty input parses to the empty flag set (regression: "" was
+// rejected with "invalid flag value", aborting any `set` of an empty
+// flag option such as the test harness init).
+@(test)
+option_manager_test_flags_from_string_empty :: proc(t: ^testing.T) {
+	flags, ok := option_manager_flags_from_string(
+		Auto_Complete,
+		Auto_Complete_Flag,
+		"",
+		option_manager_AUTO_COMPLETE_DESCS[:],
+	)
+	testing.expect(t, ok)
+	testing.expect_value(t, flags, Auto_Complete{})
+
+	flags, ok = option_manager_flags_from_string(
+		Auto_Complete,
+		Auto_Complete_Flag,
+		"insert|prompt",
+		option_manager_AUTO_COMPLETE_DESCS[:],
+	)
+	testing.expect(t, ok)
+	testing.expect_value(t, flags, Auto_Complete{.Insert, .Prompt})
+
+	// Unknown names (and empty middle segments) still fail.
+	_, ok = option_manager_flags_from_string(
+		Auto_Complete,
+		Auto_Complete_Flag,
+		"insert|nope",
+		option_manager_AUTO_COMPLETE_DESCS[:],
+	)
+	testing.expect(t, !ok)
+	_, ok = option_manager_flags_from_string(
+		Auto_Complete,
+		Auto_Complete_Flag,
+		"insert||prompt",
+		option_manager_AUTO_COMPLETE_DESCS[:],
 	)
 	testing.expect(t, !ok)
 }

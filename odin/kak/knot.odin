@@ -283,6 +283,7 @@ Highlighter :: struct {
 Highlighter_Group :: struct {
 	using base:  Highlighter,
 	highlighters: map[string]^Highlighter,
+	order:       [dynamic]string, // insertion order; owns clones of names
 	allocator:   mem.Allocator,
 }
 

@@ -551,3 +551,23 @@ test_input_handler_key_error_flag :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(track.allocation_map), 0)
 }
+
+// The no-selections kind survives the set/take roundtrip so exec can
+// abort like the C++ throw instead of continuing the sequence.
+@(test)
+test_input_handler_key_error_kind_roundtrip :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	alloc := mem.tracking_allocator(&track)
+	defer mem.tracking_allocator_destroy(&track)
+
+	h := Input_Handler{allocator = alloc}
+	input_handler_set_key_error(&h, "no selections remaining", .No_Selections_Remaining)
+	testing.expect(t, input_handler_has_key_error(&h))
+	msg, kind, failed := input_handler_take_key_error(&h, alloc)
+	testing.expect(t, failed)
+	testing.expect_value(t, kind, Input_Handler_Key_Error_Kind.No_Selections_Remaining)
+	delete(msg, alloc)
+	testing.expect(t, !input_handler_has_key_error(&h))
+	testing.expect_value(t, len(track.allocation_map), 0)
+}

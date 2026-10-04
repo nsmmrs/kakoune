@@ -638,3 +638,40 @@ test_buffer_debug :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(fdesc, "ReadOnly "))
 }
 
+// Decoded file attributes land in the buffer-local options (port of the
+// Buffer ctor/reload option sets; regression: finaleol stayed Present
+// for missing-EOL files so :write added a trailing newline).
+@(test)
+test_buffer_set_file_options :: proc(t: ^testing.T) {
+	m: Option_Manager
+	reg: Options_Registry
+	option_manager_test_setup(&m, &reg)
+	defer option_manager_registry_destroy(&reg)
+	defer option_manager_destroy(&m)
+	_, derr := option_manager_registry_declare(&reg, "eolformat", "", Eol_Format.Lf)
+	testing.expect_value(t, derr, Option_Manager_Error.None)
+	_, derr = option_manager_registry_declare(&reg, "finaleol", "", Final_Eol.Present)
+	testing.expect_value(t, derr, Option_Manager_Error.None)
+	_, derr = option_manager_registry_declare(&reg, "BOM", "", Byte_Order_Mark.None)
+	testing.expect_value(t, derr, Option_Manager_Error.None)
+
+	b := buffer_test_make([]string{"hi\n"})
+	defer buffer_destroy(b)
+	option_manager_reparent(&b.scope.data.options, &m)
+	buffer_set_file_options(b, .Utf8, .Crlf, .Missing)
+
+	opts := &b.scope.data.options
+	fe, ferr := option_manager_get_option(&m, "finaleol")
+	_ = fe
+	testing.expect_value(t, ferr, Option_Manager_Error.None)
+	got_bom, _ := option_manager_get_option(opts, "BOM")
+	testing.expect_value(t, got_bom.value.(Byte_Order_Mark), Byte_Order_Mark.Utf8)
+	got_eol, _ := option_manager_get_option(opts, "eolformat")
+	testing.expect_value(t, got_eol.value.(Eol_Format), Eol_Format.Crlf)
+	got_fe, _ := option_manager_get_option(opts, "finaleol")
+	testing.expect_value(t, got_fe.value.(Final_Eol), Final_Eol.Missing)
+	// The parent keeps the defaults (locals, not globals, changed).
+	parent_fe, _ := option_manager_get_option(&m, "finaleol")
+	testing.expect_value(t, parent_fe.value.(Final_Eol), Final_Eol.Present)
+}
+

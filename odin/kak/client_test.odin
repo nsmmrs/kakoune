@@ -17,6 +17,9 @@ Client_Test_Ui :: struct {
 	dims:              Coord_Display,
 	ui_options:        User_Interface_Options,
 	set_options_calls: int,
+	menu_shows:        int,
+	menu_nchoices:     int,
+	info_shows:        int,
 }
 
 client_test_ui_is_ok :: proc(data: rawptr) -> bool {
@@ -30,8 +33,9 @@ client_test_ui_menu_show :: proc(
 	fg, bg: Face,
 	style: User_Interface_Menu_Style,
 ) {
-	_ = data
-	_ = choices
+	ui := cast(^Client_Test_Ui)data
+	ui.menu_shows += 1
+	ui.menu_nchoices = len(choices)
 	_ = anchor
 	_ = fg
 	_ = bg
@@ -55,7 +59,8 @@ client_test_ui_info_show :: proc(
 	face: Face,
 	style: User_Interface_Info_Style,
 ) {
-	_ = data
+	ui := cast(^Client_Test_Ui)data
+	ui.info_shows += 1
 	_ = title
 	_ = content
 	_ = anchor
@@ -798,4 +803,49 @@ client_test_redraw_menu_info_show_frees_scratch :: proc(t: ^testing.T) {
 
 	option_manager_unregister_watcher(&window.data.options, client_option_watcher(c))
 	append(&f.clients.clients, c)
+}
+
+// Menu/info emission frees its temp scratch through the temp allocator
+// (regression: a bare delete freed temp memory via the heap allocator,
+// aborting an idle redraw with a completion menu open).
+@(test)
+client_test_emit_menu_show_uses_temp_allocator :: proc(t: ^testing.T) {
+	track_main: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track_main, context.allocator)
+	defer mem.tracking_allocator_destroy(&track_main)
+	main_alloc := mem.tracking_allocator(&track_main)
+	track_temp: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track_temp, context.allocator)
+	defer mem.tracking_allocator_destroy(&track_temp)
+	old_temp := context.temp_allocator
+	context.temp_allocator = mem.tracking_allocator(&track_temp)
+	defer context.temp_allocator = old_temp
+
+	ui_state := new(Client_Test_Ui, main_alloc)
+	ui_state^ = Client_Test_Ui{ok = true, dims = Coord_Display{24, 80}}
+	defer free(ui_state, main_alloc)
+	ui := new(User_Interface, main_alloc)
+	ui^ = user_interface_make(ui_state, &client_test_ui_vtable)
+	defer free(ui, main_alloc)
+	faces := face_registry_make(nil, main_alloc)
+	defer face_registry_destroy(&faces)
+
+	c: Client
+	c.allocator = main_alloc
+	c.ui = ui
+	items := make(Display_Line_List, 0, 2, main_alloc)
+	append(&items, client_display_line_from_text("w111111", Face{}, main_alloc))
+	append(&items, client_display_line_from_text("w222222", Face{}, main_alloc))
+	c.menu.items = items
+	defer client_display_line_list_destroy(&c.menu.items, main_alloc)
+	c.menu.ui_anchor = Coord_Display{3, 26}
+	c.menu.style = .Inline
+
+	main_before := len(track_main.allocation_map)
+	client_emit_menu_show(&c, &faces)
+	testing.expect_value(t, ui_state.menu_shows, 1)
+	testing.expect_value(t, ui_state.menu_nchoices, 2)
+	// Scratch is temp-owned and released; nothing leaks onto main.
+	testing.expect_value(t, len(track_temp.allocation_map), 0)
+	testing.expect_value(t, len(track_main.allocation_map), main_before)
 }

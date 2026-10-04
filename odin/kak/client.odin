@@ -377,6 +377,41 @@ client_menu_show :: proc(c: ^Client, choices: [dynamic]Display_Line, anchor: Coo
 	c.ui_pending &= ~Client_Pending_Ui{.Menu_Hide}
 }
 
+// client_emit_menu_show forwards the pending menu to the UI (split out
+// of client_redraw_ifn for testability). The wrapped choices live on
+// the temp allocator and are freed with it (never the main one:
+// freeing temp memory through the heap allocator aborts).
+client_emit_menu_show :: proc(c: ^Client, faces: ^Face_Registry) {
+	if ui_anchor, ok := c.menu.ui_anchor.?; ok {
+		choices := KNOTFIX_ui_lines(c.menu.items[:], context.temp_allocator)
+		defer delete(choices, context.temp_allocator)
+		user_interface_menu_show(
+			c.ui,
+			choices,
+			ui_anchor,
+			client_face(faces, "MenuForeground"),
+			client_face(faces, "MenuBackground"),
+			c.menu.style,
+		)
+	}
+}
+
+// client_emit_info_show forwards the pending info box to the UI (split
+// out of client_redraw_ifn for testability; same temp discipline as
+// client_emit_menu_show).
+client_emit_info_show :: proc(c: ^Client, faces: ^Face_Registry) {
+	if ui_anchor, ok := c.info.ui_anchor.?; ok {
+		title := KNOTFIX_ui_line(&c.info.title)
+		content := KNOTFIX_ui_lines(c.info.content[:], context.temp_allocator)
+		defer delete(content, context.temp_allocator)
+		face_name := "Information"
+		if client_info_is_inline(c.info.style) || c.info.style == .Menu_Doc {
+			face_name = "InlineInformation"
+		}
+		user_interface_info_show(c.ui, &title, content, ui_anchor, client_face(faces, face_name), c.info.style)
+	}
+}
+
 // client_menu_select highlights one menu entry.
 client_menu_select :: proc(c: ^Client, selected: int) {
 	c.menu.selected = selected
@@ -699,18 +734,7 @@ client_redraw_ifn :: proc(c: ^Client) {
 	}
 
 	if .Menu_Show in c.ui_pending {
-		if ui_anchor, ok := c.menu.ui_anchor.?; ok {
-			choices := KNOTFIX_ui_lines(c.menu.items[:])
-			defer delete(choices)
-			user_interface_menu_show(
-				c.ui,
-				choices,
-				ui_anchor,
-				client_face(faces, "MenuForeground"),
-				client_face(faces, "MenuBackground"),
-				c.menu.style,
-			)
-		}
+		client_emit_menu_show(c, faces)
 	}
 	if .Menu_Select in c.ui_pending {
 		if _, ok := c.menu.ui_anchor.?; ok {
@@ -749,16 +773,7 @@ client_redraw_ifn :: proc(c: ^Client) {
 	}
 
 	if .Info_Show in c.ui_pending {
-		if ui_anchor, ok := c.info.ui_anchor.?; ok {
-			title := KNOTFIX_ui_line(&c.info.title)
-			content := KNOTFIX_ui_lines(c.info.content[:])
-			defer delete(content)
-			face_name := "Information"
-			if client_info_is_inline(c.info.style) || c.info.style == .Menu_Doc {
-				face_name = "InlineInformation"
-			}
-			user_interface_info_show(c.ui, &title, content, ui_anchor, client_face(faces, face_name), c.info.style)
-		}
+		client_emit_info_show(c, faces)
 	}
 	if .Info_Hide in c.ui_pending {
 		user_interface_info_hide(c.ui)

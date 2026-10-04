@@ -50,6 +50,20 @@ highlighters_test_registry_teardown :: proc() {
 	sync.mutex_unlock(&highlighters_test_registry_mutex)
 }
 
+// highlighters_test_shared_mutex serializes the shared-highlighters
+// singleton (same rationale as the registry mutex above).
+highlighters_test_shared_mutex: sync.Mutex
+
+highlighters_test_shared_setup :: proc(alloc: mem.Allocator) {
+	sync.mutex_lock(&highlighters_test_shared_mutex)
+	highlighters_shared_init(alloc)
+}
+
+highlighters_test_shared_teardown :: proc() {
+	highlighters_shared_destroy()
+	sync.mutex_unlock(&highlighters_test_shared_mutex)
+}
+
 // highlighters_test_setup_make fills s in place (never by value: the
 // context points at the window, so the setup must not move afterwards).
 highlighters_test_setup_make :: proc(s: ^Highlighters_Test_Setup, lines: []string, alloc: mem.Allocator) {
@@ -1189,8 +1203,8 @@ highlighters_test_reference :: proc(t: ^testing.T) {
 	defer highlighters_test_setup_destroy(&s)
 	rng := highlighters_test_range(&s)
 
-	highlighters_shared_init(alloc)
-	defer highlighters_shared_destroy()
+	highlighters_test_shared_setup(alloc)
+	defer highlighters_test_shared_teardown()
 	shared := highlighters_shared_instance()
 	testing.expect(t, highlighters_shared_has_instance)
 	_ = highlighters_group_add_child(&shared.group, "shared-red", highlighters_create_fill({"red"}, nil, alloc))
@@ -1513,4 +1527,117 @@ highlighters_test_wrap_words :: proc(t: ^testing.T) {
 	for &line in db.lines {
 		testing.expect(t, display_buffer_line_length(line) <= Coord_Column(7))
 	}
+}
+
+// Regions with tied begin positions resolve in insertion order (port of
+// the C++ HashMap item order; regression: Odin map order let a later
+// line_comment region shadow an earlier doctest region).
+@(test)
+highlighters_test_regions_tie_breaks_by_insertion_order :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	alloc := mem.tracking_allocator(&track)
+	defer highlighters_test_track_check(t, &track)
+	temp_arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&temp_arena, alloc, alloc)
+	context.temp_allocator = mem.dynamic_arena_allocator(&temp_arena)
+	defer mem.dynamic_arena_destroy(&temp_arena)
+
+	highlighters_test_registry_setup(alloc)
+	defer highlighters_test_registry_teardown()
+	highlighters_register()
+
+	s: Highlighters_Test_Setup
+	highlighters_test_setup_make(&s, {"/// fence\n"}, alloc)
+	defer highlighters_test_setup_destroy(&s)
+	rng := highlighters_test_range(&s)
+
+	regions := highlighters_create_regions({}, nil, alloc)
+	defer highlighter_destroy(regions, alloc)
+	rdata := cast(^Highlighters_Regions_Data)regions.data
+	// Both regions open at column 0; the first added must win.
+	first_params := [4]string{"//[/]", "$", "fill", "red"}
+	first := highlighters_create_region(first_params[:], regions, alloc)
+	testing.expect(t, first != nil)
+	if first == nil {
+		return
+	}
+	testing.expect_value(t, highlighters_regions_add_child(rdata, "first", first), Highlighters_Error.None)
+	second_params := [4]string{"//", "$", "fill", "blue"}
+	second := highlighters_create_region(second_params[:], regions, alloc)
+	testing.expect(t, second != nil)
+	if second == nil {
+		return
+	}
+	testing.expect_value(t, highlighters_regions_add_child(rdata, "second", second), Highlighters_Error.None)
+
+	db := highlighters_test_display_buffer(&s, alloc)
+	defer display_buffer_destroy(&db)
+	highlighter_highlight(regions, highlighters_test_hctx(&s, {.Colorize}), &db, rng)
+	red_text := strings.builder_make(context.temp_allocator)
+	blue_text := strings.builder_make(context.temp_allocator)
+	for &atom in db.lines[0].atoms {
+		if highlighters_test_fg(atom.face, .Red) {
+			strings.write_string(&red_text, display_buffer_atom_content(atom))
+		}
+		if highlighters_test_fg(atom.face, .Blue) {
+			strings.write_string(&blue_text, display_buffer_atom_content(atom))
+		}
+	}
+	testing.expect_value(t, strings.to_string(red_text), "/// fence")
+	testing.expect_value(t, strings.to_string(blue_text), "")
+}
+
+// Group children apply in insertion order (port of the C++ HashMap item
+// order; regression: Odin map order applied fill over regex
+// non-deterministically, flapping comment/todo highlighting).
+@(test)
+highlighters_test_group_applies_children_in_insertion_order :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	alloc := mem.tracking_allocator(&track)
+	defer highlighters_test_track_check(t, &track)
+	temp_arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&temp_arena, alloc, alloc)
+	context.temp_allocator = mem.dynamic_arena_allocator(&temp_arena)
+	defer mem.dynamic_arena_destroy(&temp_arena)
+
+	highlighters_test_registry_setup(alloc)
+	defer highlighters_test_registry_teardown()
+	highlighters_register()
+
+	s: Highlighters_Test_Setup
+	highlighters_test_setup_make(&s, {"TODO: fix\n"}, alloc)
+	defer highlighters_test_setup_destroy(&s)
+	rng := highlighters_test_range(&s)
+
+	group := highlighters_create_group({}, nil, alloc)
+	testing.expect(t, group != nil)
+	if group == nil {
+		return
+	}
+	defer highlighter_destroy(group, alloc)
+	gdata := cast(^Highlighter_Group)group.data
+	under := highlighters_create_fill({"blue"}, nil, alloc)
+	testing.expect_value(t, highlighters_group_add_child(gdata, "under", under), Highlighters_Error.None)
+	over_params := [2]string{"TODO", "0:red"}
+	over := highlighters_create_regex(over_params[:], nil, alloc)
+	testing.expect(t, over != nil)
+	if over == nil {
+		return
+	}
+	testing.expect_value(t, highlighters_group_add_child(gdata, "over", over), Highlighters_Error.None)
+
+	db := highlighters_test_display_buffer(&s, alloc)
+	defer display_buffer_destroy(&db)
+	highlighter_highlight(group, highlighters_test_hctx(&s, {.Colorize}), &db, rng)
+	red_text := strings.builder_make(context.temp_allocator)
+	for &atom in db.lines[0].atoms {
+		if highlighters_test_fg(atom.face, .Red) {
+			strings.write_string(&red_text, display_buffer_atom_content(atom))
+		}
+	}
+	testing.expect_value(t, strings.to_string(red_text), "TODO")
 }
