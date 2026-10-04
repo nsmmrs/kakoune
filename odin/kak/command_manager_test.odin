@@ -626,3 +626,48 @@ command_manager_test_execute_buffer_option_fallback :: proc(t: ^testing.T) {
 	testing.expect_value(t, rerr, File_Error.None)
 	testing.expect_value(t, data, "k")
 }
+
+// %opt expansion frees its string list with the caller allocator
+// (regression: a bare delete ran the ambient allocator on
+// caller-owned memory, aborting modeline-parse with "free():
+// invalid pointer").
+@(test)
+command_manager_test_option_expand_uses_caller_allocator :: proc(t: ^testing.T) {
+	f := test_commands_setup()
+	defer test_commands_teardown(f)
+	buf := test_commands_make_buffer(f, "*test*", {}, {"hello"})
+	ctx := test_commands_make_context(f, buf)
+	defer context_destroy(&ctx)
+
+	p, spec, _ := test_commands_parse(f, "declare-option", {"int", "mltab"})
+	defer test_commands_free_parse(f, &p, &spec)
+	derr, dmsg := commands_declare_option(&p, &f.env, f.allocator)
+	defer test_commands_free_msg(dmsg, f.allocator)
+	testing.expect_value(t, derr, Commands_Error.None)
+	sc := test_commands_make_shell(f)
+	defer test_commands_free_shell(f, &sc)
+
+	caller_track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&caller_track, context.allocator)
+	defer mem.tracking_allocator_destroy(&caller_track)
+	caller := mem.tracking_allocator(&caller_track)
+	ambient_track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&ambient_track, context.allocator)
+	defer mem.tracking_allocator_destroy(&ambient_track)
+	old_alloc := context.allocator
+	context.allocator = mem.tracking_allocator(&ambient_track)
+	defer context.allocator = old_alloc
+
+	params := make([dynamic]string, 0, caller)
+	token := Token{type = .Option_Expand, content = strings.clone("mltab", caller)}
+	eerr, emsg := command_manager_expand_token_multi(token, &ctx, &sc, &params, caller)
+	testing.expect_value(t, eerr, Command_Manager_Error.None)
+	testing.expect_value(t, emsg, "")
+	testing.expect_value(t, len(params), 1)
+	for s in params {
+		delete(s, caller)
+	}
+	delete(params)
+	testing.expect_value(t, len(ambient_track.bad_free_array), 0)
+	testing.expect_value(t, len(caller_track.allocation_map), 0)
+}

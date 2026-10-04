@@ -669,7 +669,7 @@ command_manager_expand_token_multi :: proc(
 		for s in strs {
 			append(params, s)
 		}
-		delete(strs)
+		delete(strs, allocator)
 		return .None, ""
 	case .Val_Expand:
 		if value, found := shell_ctx.env_vars[content]; found {

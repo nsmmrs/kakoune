@@ -270,3 +270,10 @@ faces: 20100 vectors (100 seeds), 0 mismatches
 keymap_manager: 20036 vectors (36 seeds), 0 mismatches
 parameters_parser: 20034 vectors (34 seeds), 0 mismatches
 RESULT: PASS
+
+ACCEPTANCE test/run-odin 2026-10-04 (master 46e8d950 + modeline fix)
+unit: 1094 green (default, -vet -strict-style, single-thread, zero WARNs)
+regression: 168/168, normal: 294/294, indent: 113/113, compose: 29/29
+highlight: 39/39, commands: 6/6, hooks: 5/5, shell: 4/4, display: 4/4
+prompt: 7/7, tools: 7/7 — total 676/676, 0 failures
+RESULT: PASS
