@@ -1,7 +1,7 @@
 ---
 id: EPIC-d7c7yw
 title: "Crack the knot (wave 5)"
-status: backlog
+status: done
 type: epic
 priority: 3
 deps:
@@ -13,7 +13,8 @@ deps:
 - TASK-t0cdl4
 - TASK-2fzcwy
 created: "2026-10-03T10:30:57.250988Z"
-updated: "2026-10-03T10:30:57.250988Z"
+updated: "2026-10-04T01:11:01.965456Z"
 ---
+
 
 Buffer Window Client Context Scope OptionManager HookManager: centrally spec shared types, then fan out implementations.
